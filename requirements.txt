@@ -1,0 +1,5 @@
+imgui
+PySDL2
+numpy
+Pillow
+pydub
