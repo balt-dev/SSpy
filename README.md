@@ -1,4 +1,4 @@
-# SSPlys - A python-based level editor for SS+ (or Sound Space)
+# SSPy - A python-based level editor for SS+ (or Sound Space)
 
 
 
