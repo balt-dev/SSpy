@@ -1,5 +1,7 @@
-imgui
+imgui~=1.4.1
+imgui-datascience
 PySDL2
-numpy
+numpy~=1.23.3
 Pillow
-pydub
+pydub~=0.25.1
+opencv-python~=4.6.0.66

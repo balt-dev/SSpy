@@ -1,5 +1,7 @@
 from io import BytesIO
 
+import cv2
+import numpy as np
 from PIL import Image
 from pydub import AudioSegment
 import struct
@@ -18,7 +20,7 @@ class Level:
                  name: str = "Unnamed",
                  author: str = "Unknown Author",
                  notes: dict[tuple[int, int]] = None,
-                 cover: Image = None,
+                 cover: np.ndarray = None,
                  audio: AudioSegment = None,
                  difficulty: int = -1):
         self.id = song_id
@@ -30,7 +32,7 @@ class Level:
         self.difficulty = difficulty
 
     def __str__(self):
-        return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes)"
+        return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
     @classmethod
     def from_sspm(cls, file):
@@ -51,7 +53,7 @@ class Level:
             image_data = file.read(data_length)
             io = BytesIO(image_data)
             with Image.open(io) as im:
-                cover = im.copy()
+                cover = cv2.cvtColor(np.array(im.convert("RGBA"), dtype=np.uint8), cv2.COLOR_RGB2BGR)
         audio = None
         if file.read(1) == b"\x01":
             data_length = int.from_bytes(file.read(8), "little")
