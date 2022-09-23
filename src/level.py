@@ -1,4 +1,4 @@
-from io import BytesIO
+from io import BytesIO, StringIO
 
 import cv2
 import numpy as np
@@ -51,15 +51,15 @@ class Level:
         if file.read(1) == b"\x02":
             data_length = int.from_bytes(file.read(8), "little")
             image_data = file.read(data_length)
-            io = BytesIO(image_data)
-            with Image.open(io) as im:
-                cover = cv2.cvtColor(np.array(im.convert("RGBA"), dtype=np.uint8), cv2.COLOR_RGB2BGR)
+            with BytesIO(image_data) as io:
+                with Image.open(io) as im:
+                    cover = cv2.cvtColor(np.array(im.convert("RGBA"), dtype=np.uint8), cv2.COLOR_RGB2BGR)
         audio = None
         if file.read(1) == b"\x01":
             data_length = int.from_bytes(file.read(8), "little")
             image_data = file.read(data_length)
-            io = BytesIO(image_data)
-            audio = AudioSegment.from_file(io)
+            with BytesIO(image_data) as io:
+                audio = AudioSegment.from_file(io)
         notes = {}
         for _ in range(note_count):
             timing = int.from_bytes(file.read(4), "little")
@@ -78,5 +78,45 @@ class Level:
             output.write(bytes(self.name + "\n","utf-8"))
             output.write(bytes(self.author + "\n","utf-8"))
             output.write(
-                max(self.notes.keys()).to_bytes(4,"little")
+                max(self.notes.keys())).to_bytes(4,"little")
             )
+            output.write(
+                len(self.notes).to_bytes(4,"little")
+            )
+            output.write(
+                self.difficulty.to_bytes(1,"little")
+            )
+            if cover is None:
+                output.write(b"\x00")
+            else:
+                output.write(b"\x02")
+                with BytesIO() as im_data:
+                    Image.fromarray(
+                        cv2.cvtColor(self.cover,cv2.COLOR_RGB2BGR)
+                    ).save(im_data)
+                    output.write(
+                        im_data.seek(0,2).to_bytes(8,"little")
+                    )
+                    output.write(im_data.getvalue())
+            if audio is None:
+                output.write(b"\x00")
+            else:
+                output.write(b"\x01")
+                with StringIO() as audio_data:
+                    self.audio.export(audio_data, format="ogg")
+                    output.write(
+                        audio_data.seek(0,2).to_bytes(8,"little")
+                    )
+                    output.write(audio_data.getvalue())
+            for timing, position in self.notes.items():
+                output.write(
+                    timing.to_bytes(4,"little")
+                )
+                if all([isinstance(n, int) for n in position]):
+                    output.write(b"\x00")
+                    output.write(position[0].to_bytes(1,"little"))
+                    output.write(position[1].to_bytes(1,"little"))
+                else:
+                    output.write(b"\x01")
+                    output.write(struct.pack("<f",position[0]))
+                    output.write(struct.pack("<f",position[1]))
