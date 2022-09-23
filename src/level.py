@@ -11,7 +11,7 @@ def read_line(file):
     out = bytearray(b"")
     while (f := file.read(1)) != b"\n":
         out.append(int.from_bytes(f, "little"))
-    return out.decode("ascii")
+    return out.decode("utf-8")
 
 
 class Level:
@@ -71,3 +71,12 @@ class Level:
                 y = struct.unpack("f", file.read(4))
             notes[timing] = x, y
         return Level(song_id, song_name, song_author, notes, cover, audio, difficulty)
+
+    def save(self):
+        with BytesIO(b"SS+m\x01\x00\x00\x00") as output:
+            output.write(bytes(self.id + "\n","utf-8"))
+            output.write(bytes(self.name + "\n","utf-8"))
+            output.write(bytes(self.author + "\n","utf-8"))
+            output.write(
+                max(self.notes.keys()).to_bytes(4,"little")
+            )
