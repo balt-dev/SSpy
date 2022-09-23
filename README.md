@@ -11,7 +11,7 @@ Quantum notes will obviously be supported, but beziers are a no-go.
 
 > Why is there no Vulnus support?
 
-Go fuck yourself. I hate you and everything you stand for. 
+Don't even fucking get me started about Vulnus. There's many reasons I want kermeet's head on a metaphorical spike, and I don't wanna get into it.
 
 ## Notes:
 
