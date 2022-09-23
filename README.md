@@ -4,6 +4,11 @@
 
 ---
 ## FAQ:
+> What's planned?
+
+Opening .sspm maps and raw text maps, and saving as .sspm files.\
+Quantum notes will obviously be supported, but beziers are a no-go.
+
 > Why is there no Vulnus support?
 
 Fuck you.
