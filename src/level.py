@@ -16,14 +16,13 @@ def read_line(file):
 
 class Level:
     def __init__(self,
-                 song_id="",
                  name: str = "Unnamed",
                  author: str = "Unknown Author",
-                 notes: dict[tuple[int, int]] = None,
+                 notes: dict[int, tuple[int, int]] = None,
                  cover: np.ndarray = None,
                  audio: AudioSegment = None,
                  difficulty: int = -1):
-        self.id = song_id
+        self.id = (author.lower() + " " + name.lower()).replace(" ", "_")
         self.name = name
         self.author = author
         self.notes = notes if notes is not None else {}
@@ -41,7 +40,7 @@ class Level:
             "Sorry, this doesn't support SSPM v2. Use the in-game editor."
         assert file.read(2) == b"\x00\x00", \
             "Reserved bits aren't 0. Is this a modchart?"
-        song_id = read_line(file)
+        read_line(file)
         song_name = read_line(file)
         song_author = read_line(file)
         file.read(4)  # MS length, not needed
@@ -57,8 +56,8 @@ class Level:
         audio = None
         if file.read(1) == b"\x01":
             data_length = int.from_bytes(file.read(8), "little")
-            image_data = file.read(data_length)
-            with BytesIO(image_data) as io:
+            audio_data = file.read(data_length)
+            with BytesIO(audio_data) as io:
                 audio = AudioSegment.from_file(io)
         notes = {}
         for _ in range(note_count):
@@ -67,56 +66,56 @@ class Level:
                 x = int.from_bytes(file.read(1), "little")
                 y = int.from_bytes(file.read(1), "little")
             else:
-                x = struct.unpack("f", file.read(4))
-                y = struct.unpack("f", file.read(4))
+                x, y = struct.unpack("ff", file.read(8))  # nice
             notes[timing] = x, y
-        return Level(song_id, song_name, song_author, notes, cover, audio, difficulty)
+        return Level(song_name, song_author, notes, cover, audio, difficulty)
 
     def save(self):
-        with BytesIO(b"SS+m\x01\x00\x00\x00") as output:
-            output.write(bytes(self.id + "\n","utf-8"))
-            output.write(bytes(self.name + "\n","utf-8"))
-            output.write(bytes(self.author + "\n","utf-8"))
+        with BytesIO() as output:
+            output.write(b"SS+m\x01\x00\x00\x00")
+            output.write(bytes(self.id + "\n", "utf-8"))
+            output.write(bytes(self.name + "\n", "utf-8"))
+            output.write(bytes(self.author + "\n", "utf-8"))
             output.write(
-                max(self.notes.keys())).to_bytes(4,"little")
+                (max(self.notes.keys()) if len(self.notes) else 0).to_bytes(4, "little")
             )
             output.write(
-                len(self.notes).to_bytes(4,"little")
+                len(self.notes).to_bytes(4, "little")
             )
             output.write(
-                self.difficulty.to_bytes(1,"little")
+                (self.difficulty + 1).to_bytes(1, "little")
             )
-            if cover is None:
+            if self.cover is None:
                 output.write(b"\x00")
             else:
                 output.write(b"\x02")
                 with BytesIO() as im_data:
                     Image.fromarray(
-                        cv2.cvtColor(self.cover,cv2.COLOR_RGB2BGR)
-                    ).save(im_data)
+                        cv2.cvtColor(self.cover, cv2.COLOR_RGB2BGR)
+                    ).save(im_data, format="PNG")
                     output.write(
-                        im_data.seek(0,2).to_bytes(8,"little")
+                        im_data.seek(0, 2).to_bytes(8, "little")
                     )
                     output.write(im_data.getvalue())
-            if audio is None:
+            if self.audio is None:
                 output.write(b"\x00")
             else:
                 output.write(b"\x01")
-                with StringIO() as audio_data:
+                with BytesIO() as audio_data:
                     self.audio.export(audio_data, format="ogg")
                     output.write(
-                        audio_data.seek(0,2).to_bytes(8,"little")
+                        audio_data.seek(0, 2).to_bytes(8, "little")
                     )
                     output.write(audio_data.getvalue())
             for timing, position in self.notes.items():
                 output.write(
-                    timing.to_bytes(4,"little")
+                    timing.to_bytes(4, "little")
                 )
                 if all([isinstance(n, int) for n in position]):
                     output.write(b"\x00")
-                    output.write(position[0].to_bytes(1,"little"))
-                    output.write(position[1].to_bytes(1,"little"))
+                    output.write(position[0].to_bytes(1, "little"))
+                    output.write(position[1].to_bytes(1, "little"))
                 else:
                     output.write(b"\x01")
-                    output.write(struct.pack("<f",position[0]))
-                    output.write(struct.pack("<f",position[1]))
+                    output.write(struct.pack("<ff", *position))
+            return output.getvalue()

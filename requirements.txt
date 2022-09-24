@@ -1,6 +1,6 @@
 imgui~=1.4.1
 imgui-datascience
-PySDL2
+glfw
 numpy~=1.23.3
 Pillow
 pydub~=0.25.1
