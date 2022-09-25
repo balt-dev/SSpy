@@ -2,4 +2,5 @@
 **/.git/
 **/__pycache__
 **/venv/
+**/.vscode/
 imgui.ini
