@@ -33,6 +33,9 @@ class Level:
     def __str__(self):
         return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
+    def __hash__(self):
+        return hash(self.id, tuple(self.notes.items()), self.cover, self.audio, self.difficulty)
+
     @classmethod
     def from_sspm(cls, file):
         assert file.read(4) == b"SS+m", "Invalid file signature! Did you choose a .sspm?"
