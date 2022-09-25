@@ -114,7 +114,7 @@ class Editor:
             else:
                 distance = 4
             delta = int((60 / self.bpm) * 1000)
-            self.time = min(max(self.time + (y * delta // distance), 0), ending - self.approach_rate)
+            self.time = min(max(self.time + (y * delta // distance), 0), ending)
 
     def start(self, window, impl, font, gl_ctx):
         self.io = imgui.get_io()
@@ -133,7 +133,7 @@ class Editor:
         while running:
             if self.level is not None:
                 if self.level.audio is not None:
-                    if hash(self.level.audio) != old_audio:
+                    if hash(self.level.audio) != old_audio or sdlmixer_audio is None:
                         audio_data = np.array(self.level.audio.get_array_of_samples(), dtype=np.int16)
                         old_audio = hash(self.level.audio)
                         # why is it like this ;-;
@@ -143,14 +143,17 @@ class Editor:
                         buflen = len(arr_bytes)
                         c_buf = (ctypes.c_ubyte * buflen).from_buffer_copy(arr_bytes)
                         sdlmixer_audio = sdlmixer.Mix_QuickLoad_RAW(ctypes.cast(c_buf, ctypes.POINTER(ctypes.c_ubyte)), buflen)
-                    sdl2.sdlmixer.Mix_PlayChannel(1, sdlmixer_audio, 0)
+                    sdlmixer.Mix_PlayChannel(0, sdlmixer_audio, 0)
             impl.process_inputs()
             imgui.new_frame()
 
-            if self.playing and sdlmixer.Mix_Paused(1):
-                sdlmixer.Mix_Resume(1)
-            elif not self.playing and not sdlmixer.Mix_Paused(1):
-                sdlmixer.Mix_Pause(1)
+            # if self.playing and sdlmixer.Mix_Paused(0):
+            #    print("AAA")
+            #    sdlmixer.Mix_Resume(0)
+            # elif not self.playing and not sdlmixer.Mix_Paused(0):
+            #    sdlmixer.Mix_Pause(0)
+            if (sdlmixer.Mix_Playing(0)):
+                print("audio is actually fucking playing!!!!")
             with imgui.font(font):
                 while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
                     if event.type == sdl2.SDL_QUIT:
@@ -337,7 +340,7 @@ class Editor:
                                                               center - int((sample / extent) * 25), x + int((w / waveform_width) * n) + 1,
                                                               center + int((sample / extent) * 25), 0x20ffffff)
                             ending_time = (np.max(times_to_display) if times_to_display.shape[0] > 0 else 1000)
-                            if self.playing and self.time + self.approach_rate >= ending_time:
+                            if self.playing and self.time >= ending_time:
                                 self.playing = False
                             for note in times_to_display:
                                 progress = note / ending_time
@@ -350,7 +353,6 @@ class Editor:
                             if self.bpm_markers:
                                 seconds_per_beat = 60 / self.bpm
                                 bpm_time = ending_time + int(self.offset % (1000 * seconds_per_beat))
-                                print(bpm_time, ending_time)
                                 beats = bpm_time / (1000 * seconds_per_beat)
                                 for n in range(math.ceil(beats)):
                                     progress = (w / beats) * (n + ((self.offset / (1000 * seconds_per_beat)) % (1000 * seconds_per_beat)))
