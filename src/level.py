@@ -35,7 +35,7 @@ class Level:
         return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
     def __hash__(self):
-        return hash((self.id, tuple(self.notes.keys()), np.array(self.notes.values).tobytes(), self.cover.tobytes() if self.cover is not None else None, self.audio, self.difficulty))
+        return hash((self.id, tuple(self.notes.keys()), str(self.notes.values()), self.cover.tobytes() if self.cover is not None else None, self.audio, self.difficulty))
 
     @lru_cache
     def get_end(self):

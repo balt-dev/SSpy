@@ -1,6 +1,7 @@
 import ctypes
 import glob
 import math
+from operator import index
 import os
 import time
 import traceback
@@ -54,6 +55,8 @@ class Editor:
         self.last_saved_hash = None
         self.playback = None
         self.error = None
+        self.time_signature = (4, 4)
+        self.note_snapping = 3, 3
 
     def file_display(self, extensions):
         changed = False
@@ -64,7 +67,6 @@ class Editor:
                     Path.resolve(Path(self.current_folder))
                 )
             except Exception:
-                traceback.print_exc()
                 os.chdir(Path.resolve(Path(__file__).parent))
             self.current_folder = os.getcwd()
             changed = True
@@ -115,18 +117,17 @@ class Editor:
 
     def time_scroll(self, y):
         if self.level is not None:
+            distance = self.time_signature[0]
             if tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_LSHIFT] or tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_RSHIFT]:
                 distance = 1
-            elif tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_LCTRL] or tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_RCTRL]:
-                distance = 16
-            else:
-                distance = 4
-            delta = int((60 / self.bpm) * 1000)
+            if tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_LCTRL] or tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_RCTRL]:
+                distance **= 2
+            delta = ((60 / self.bpm) * 1000)
             old_time = self.time
             if tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_LALT] or tuple(self.io.keys_down)[sdl2.SDL_SCANCODE_RALT]:
-                self.time = max(self.time + ((y * 4) / distance), 0)
+                self.time = max(self.time + y, 0)
             else:
-                self.time = max(self.time + (y * delta / distance), 0)
+                self.time = max(self.time + (y * (delta / distance)), 0)
             if self.playback is not None:
                 self.playback.stop()
                 self.playback = play_at_position(self.level.audio, self.time / 1000)
@@ -146,7 +147,6 @@ class Editor:
         was_playing = False
         old_mouse = (0, 0, 0, 0, 0)
         while running:
-            old_time = self.time
             if self.level is not None:
                 if self.level.audio is not None:
                     if hash(self.level.audio) != old_audio:
@@ -155,7 +155,7 @@ class Editor:
             impl.process_inputs()
             imgui.new_frame()
             keys = tuple(self.io.keys_down)
-            if keys[32] and self.level is not None:  # Space
+            if keys[sdl2.SDLK_SPACE] and self.level is not None:
                 if not space_last:
                     self.playing = not self.playing
                 space_last = True
@@ -171,11 +171,18 @@ class Editor:
                 del self.starting_position
                 self.playback.stop()
                 self.playback = None
-                if self.bpm != 0:
+                if self.bpm_markers and self.bpm:
                     seconds_per_beat = 60 / self.bpm
-                    self.time = int(self.time / (1000 * seconds_per_beat)) * (1000 * seconds_per_beat)  # snap to the nearest quarter step
-                    # TODO: add irregular time support for bpm markers and scrolling
+                    self.time = int(self.time / (1000 * seconds_per_beat)) * (1000 * seconds_per_beat)
             was_playing = self.playing
+            if self.level is None:
+                sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
+            elif self.filename is None:
+                sdl2.SDL_SetWindowTitle(window, "*out.sspm - SSPy".encode("utf-8"))
+            elif self.last_saved_hash != hash(self.level):
+                sdl2.SDL_SetWindowTitle(window, f"*{self.filename} - SSPy".encode("utf-8"))
+            else:
+                sdl2.SDL_SetWindowTitle(window, f"{self.filename} - SSPy".encode("utf-8"))
             with imgui.font(font):
                 while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
                     if event.type == sdl2.SDL_QUIT:
@@ -188,29 +195,51 @@ class Editor:
                         self.time_scroll(event.wheel.y)
                     impl.process_event(event)
                 menu_choice = None
+                if self.io.key_ctrl:
+                    if keys[sdl2.SDLK_n]:
+                        self.level = Level()
+                        self.filename = None
+                        self.playing = False
+                        self.last_saved_hash = None
+                        self.time = 0
+                    if keys[sdl2.SDLK_o]:
+                        menu_choice = "file.open"
+                    if keys[sdl2.SDLK_s]:
+                        if self.filename is not None and not keys[sdl2.SDL_SCANCODE_LSHIFT]:
+                            with open(self.filename, "wb+") as f:
+                                f.write(self.level.save())
+                            self.last_saved_hash = hash(self.level)
+                        else:
+                            menu_choice = "file.saveas"
+                    if keys[sdl2.SDLK_q]:
+                        self.playing = False
+                        if self.last_saved_hash == hash(self.level) or (self.filename is not None and self.last_saved_hash is None):
+                            running = False
+                        else:
+                            menu_choice = "quit.ensure"
                 if imgui.begin_main_menu_bar():
                     if imgui.begin_menu("File"):
-                        if imgui.menu_item("New")[0]:
+                        if imgui.menu_item("New", "ctrl + n")[0]:
                             self.level = Level()
                             self.filename = None
                             self.playing = False
                             self.last_saved_hash = None
                             self.time = 0
-                        if imgui.menu_item("Open...")[0]:
+                        if imgui.menu_item("Open...", "ctrl + o")[0]:
                             menu_choice = "file.open"
-                        if imgui.menu_item("Save", enabled=(self.level is not None))[0]:
+                        if imgui.menu_item("Save", "ctrl + s", enabled=(self.level is not None and self.filename is not None))[0]:
                             if self.filename is not None:
                                 with open(self.filename, "wb+") as f:
                                     f.write(self.level.save())
                                 self.last_saved_hash = hash(self.level)
                             else:
                                 menu_choice = "file.saveas"
-                        if imgui.menu_item("Save As...", enabled=self.level is not None)[0]:
+                        if imgui.menu_item("Save As...", "ctrl + shift + s", enabled=self.level is not None)[0]:
                             if self.filename is not None:
                                 self.temp_filename = self.filename
                             menu_choice = "file.saveas"
                         imgui.separator()
-                        if imgui.menu_item("Quit")[0]:
+                        if imgui.menu_item("Quit", "ctrl + q")[0]:
                             self.playing = False
                             if self.last_saved_hash == hash(self.level) or (self.filename is not None and self.last_saved_hash is None):
                                 running = False
@@ -269,7 +298,31 @@ class Editor:
                         changed, value = imgui.input_int("BPM", self.bpm, 0)
                         if changed:
                             self.bpm = value
+                        imgui.push_item_width(49)
+                        changed, value = imgui.input_int("", self.time_signature[0], 0)
+                        if changed:
+                            self.time_signature = (value, self.time_signature[1])
+                        imgui.same_line()
+                        imgui.text("/")
+                        imgui.same_line()
+                        changed, value = imgui.input_int("Time Signature", self.time_signature[1], 0)
+                        if changed:
+                            self.time_signature = (self.time_signature[0], min(max(1 << (value - 1).bit_length(), 1), 256))
                         imgui.separator()
+                        changed, value = imgui.input_int("##", self.note_snapping[0], 0)
+                        if changed:
+                            self.note_snapping = (min(16, max(value, 0)), self.note_snapping[1])
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off snapping.")
+                        imgui.same_line()
+                        imgui.text("/")
+                        imgui.same_line()
+                        changed, value = imgui.input_int("Note snapping", self.note_snapping[1], 0)
+                        if changed:
+                            self.note_snapping = (self.note_snapping[0], min(16, max(value, 0)))
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off snapping.")
+                        imgui.pop_item_width()
                         changed, value = imgui.slider_int("Approach Rate (ms)", self.approach_rate, 50, 2000)
                         if changed:
                             self.approach_rate = value
@@ -384,13 +437,10 @@ class Editor:
                                                (y + h), 0x80ffffff, thickness=3)
                             if self.bpm_markers and self.bpm != 0:
                                 # TODO: fix weirdness with short maps
-                                seconds_per_beat = 60 / self.bpm
+                                seconds_per_beat = 60 / (self.bpm * (self.time_signature[1] / 4))
                                 bpm_time = max(ending_time, self.time + (2000 * seconds_per_beat)) + int(self.offset % (1000 * seconds_per_beat))
                                 beats = bpm_time / (1000 * seconds_per_beat)
                                 for n in range(math.ceil(beats)):
-                                    progress = (w / beats) * (n + ((self.offset / (1000 * seconds_per_beat)) % (1000 * seconds_per_beat)))
-                                    draw_list.add_rect_filled(x + int(progress), (y + h) - 50,
-                                                              x + int(progress) + 1, (y + h), 0x400000ff)
                                     beat_time = (n + ((self.offset / (1000 * seconds_per_beat)) % (1000 * seconds_per_beat))) * seconds_per_beat * 1000
                                     if beat_time >= self.time and beat_time < self.time + (self.approach_rate):
                                         line_prog = 1 - ((beat_time - self.time) / (self.approach_rate))
@@ -400,9 +450,9 @@ class Editor:
                                             self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
                                             self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
-                                            0xff000000 | int(0xFF * line_prog), thickness=int(4 * line_prog))
+                                            (0xff000000 if n % self.time_signature[0] == 0 else 0x80000000) | int(0xFF * line_prog), thickness=int((4 if n % self.time_signature[0] == 0 else 2) * line_prog))
 
-                            times_to_display = times_to_display[np.logical_and(times_to_display >= self.time,
+                            times_to_display = times_to_display[np.logical_and(times_to_display >= self.time - 1,
                                                                                (times_to_display) < (
                                                                                    self.time + self.approach_rate))].flatten().tolist()
                             for note_time in times_to_display[::-1]:
@@ -413,9 +463,9 @@ class Editor:
                             mouse_pos = tuple(self.io.mouse_pos)
                             if ((mouse_pos[0] >= adjusted_x and mouse_pos[0] < adjusted_x + square_side) and
                                     (mouse_pos[1] >= y and mouse_pos[1] < y + square_side)) and imgui.is_window_hovered():
-                                note_pos = ((((mouse_pos[0] - adjusted_x) / square_side) * 3) - 0.5, (((mouse_pos[1] - y) / square_side) * 3) - 0.5)
+                                note_pos = ((((mouse_pos[0] - (adjusted_x + 10)) / (square_side - 10)) * 3) - 0.5, (((mouse_pos[1] - (y + 10)) / (square_side - 10)) * 3) - 0.5)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
-                                time_arr = time_arr[np.logical_and(time_arr - self.time >= 0, time_arr - self.time < 10)]
+                                time_arr = time_arr[np.logical_and(time_arr - self.time >= -1, time_arr - self.time < 10)]
                                 closest_time = np.min(time_arr) if time_arr.size > 0 else self.time
                                 closest_index = None
                                 closest_dist = None
@@ -430,13 +480,19 @@ class Editor:
                                                 closest_index = i
                                     if closest_index is not None:
                                         del self.level.notes[int(closest_time)][closest_index]
-                                if closest_index is None:
-                                    self.draw_note(draw_list, note_pos, (adjusted_x, y, adjusted_x + square_side, y + square_side), 1.0, color=0xffff00, alpha=0x40)
-                                    if tuple(self.io.mouse_down)[0] and not old_mouse[0]:
-                                        if int(self.time + 1) in self.level.notes:
-                                            self.level.notes[int(self.time + 1)].append(note_pos)
-                                        else:
-                                            self.level.notes[int(self.time + 1)] = [note_pos]
+                                        if len(self.level.notes[int(closest_time)]) == 0:
+                                            del self.level.notes[int(closest_time)]
+                                # adjust for snapping
+                                def adjust(x, s): return (((round(((x) / 2) * (s - 1)) / (s - 1)) * 2)) if s != 0 else x
+                                np_x = adjust(note_pos[0], self.note_snapping[0])
+                                np_y = adjust(note_pos[1], self.note_snapping[1])
+                                note_pos = (np_x, np_y)
+                                self.draw_note(draw_list, note_pos, (adjusted_x, y, adjusted_x + square_side, y + square_side), 1.0, color=0xffff00, alpha=0x40)
+                                if tuple(self.io.mouse_down)[0] and not old_mouse[0]:
+                                    if int(self.time) in self.level.notes:
+                                        self.level.notes[int(self.time)].append(note_pos)
+                                    else:
+                                        self.level.notes[int(self.time)] = [note_pos]
                         imgui.end_child()
                         imgui.end()
 
