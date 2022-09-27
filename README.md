@@ -15,10 +15,10 @@ Don't get me started.
 
 > How do I run it?
 Install git and python if you haven't, then
-`git clone [url] sspy
+```git clone [url] sspy
 cd sspy
 pip install -r requirements.txt
-python main.py`
+python main.py```
 
 ## Notes:
 
