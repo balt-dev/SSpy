@@ -13,9 +13,9 @@ Quantum notes will obviously be supported, but beziers might be annoying.
 
 Don't get me started.
 
-> How do I run it? \
+> How do I run it?
 
-Install git and python if you haven't, then \
+Install git and python if you haven't, then
 ```
 git clone [url] sspy
 cd sspy
