@@ -1,3 +1,4 @@
+from functools import lru_cache
 from io import BytesIO, StringIO
 
 import cv2
@@ -18,7 +19,7 @@ class Level:
     def __init__(self,
                  name: str = "Unnamed",
                  author: str = "Unknown Author",
-                 notes: dict[int, tuple[int, int]] = None,
+                 notes: dict[int, list[tuple[int, int]]] = None,
                  cover: np.ndarray = None,
                  audio: AudioSegment = None,
                  difficulty: int = -1):
@@ -34,11 +35,16 @@ class Level:
         return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
     def __hash__(self):
-        return hash(self.id, tuple(self.notes.items()), self.cover, self.audio, self.difficulty)
+        return hash((self.id, tuple(self.notes.keys()), np.array(self.notes.values).tobytes(), self.cover.tobytes() if self.cover is not None else None, self.audio, self.difficulty))
+
+    @lru_cache
+    def get_end(self):
+        times_to_display = np.array(tuple(self.notes.keys()), dtype=np.uint32)
+        return (np.max(times_to_display) if times_to_display.shape[0] > 0 else 1000)
 
     @classmethod
     def from_sspm(cls, file):
-        assert file.read(4) == b"SS+m", "Invalid file signature! Did you choose a .sspm?"
+        assert file.read(4) == b"SS+m", "Invalid file signature! Your level might be corrupted, or in the wrong format."
         assert file.read(2) == b"\x01\x00", \
             "Sorry, this doesn't support SSPM v2. Use the in-game editor."
         assert file.read(2) == b"\x00\x00", \
@@ -70,7 +76,10 @@ class Level:
                 y = int.from_bytes(file.read(1), "little")
             else:
                 x, y = struct.unpack("ff", file.read(8))  # nice
-            notes[timing] = x, y
+            if timing in notes:
+                notes[timing].append((x, y))
+            else:
+                notes[timing] = [(x, y)]
         return Level(song_name, song_author, notes, cover, audio, difficulty)
 
     def save(self):
@@ -110,15 +119,16 @@ class Level:
                         audio_data.seek(0, 2).to_bytes(8, "little")
                     )
                     output.write(audio_data.getvalue())
-            for timing, position in self.notes.items():
-                output.write(
-                    timing.to_bytes(4, "little")
-                )
-                if all([isinstance(n, int) for n in position]):
-                    output.write(b"\x00")
-                    output.write(position[0].to_bytes(1, "little"))
-                    output.write(position[1].to_bytes(1, "little"))
-                else:
-                    output.write(b"\x01")
-                    output.write(struct.pack("<ff", *position))
+            for timing, notes in self.notes.items():
+                for position in notes:
+                    output.write(
+                        timing.to_bytes(4, "little")
+                    )
+                    if all([isinstance(n, int) for n in position]):
+                        output.write(b"\x00")
+                        output.write(position[0].to_bytes(1, "little"))
+                        output.write(position[1].to_bytes(1, "little"))
+                    else:
+                        output.write(b"\x01")
+                        output.write(struct.pack("<ff", *position))
             return output.getvalue()
