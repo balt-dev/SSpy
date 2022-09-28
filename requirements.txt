@@ -1,9 +1,7 @@
 imgui~=1.4.1
-imgui-datascience
 pysdl2
 pysdl2-dll
 numpy~=1.23.3
 Pillow
 pydub~=0.25.1
-opencv-python~=4.6.0.66
 simpleaudio

@@ -1,7 +1,6 @@
 from functools import lru_cache
-from io import BytesIO, StringIO
+from io import BytesIO
 
-import cv2
 import numpy as np
 from PIL import Image
 from pydub import AudioSegment
@@ -20,7 +19,7 @@ class Level:
                  name: str = "Unnamed",
                  author: str = "Unknown Author",
                  notes: dict[int, list[tuple[int, int]]] = None,
-                 cover: np.ndarray = None,
+                 cover: Image.Image = None,
                  audio: AudioSegment = None,
                  difficulty: int = -1):
         self.id = (author.lower() + " " + name.lower()).replace(" ", "_")
@@ -61,7 +60,7 @@ class Level:
             image_data = file.read(data_length)
             with BytesIO(image_data) as io:
                 with Image.open(io) as im:
-                    cover = cv2.cvtColor(np.array(im.convert("RGBA"), dtype=np.uint8), cv2.COLOR_RGB2BGR)
+                    cover = im.copy()
         audio = None
         if file.read(1) == b"\x01":
             data_length = int.from_bytes(file.read(8), "little")
@@ -102,9 +101,7 @@ class Level:
             else:
                 output.write(b"\x02")
                 with BytesIO() as im_data:
-                    Image.fromarray(
-                        cv2.cvtColor(self.cover, cv2.COLOR_RGB2BGR)
-                    ).save(im_data, format="PNG")
+                    self.cover.save(im_data, format="PNG")
                     output.write(
                         im_data.seek(0, 2).to_bytes(8, "little")
                     )
