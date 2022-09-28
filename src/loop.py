@@ -358,7 +358,7 @@ class Editor:
                         imgui.separator()
                         changed, value = imgui.input_int("##", self.note_snapping[0], 0)
                         if changed:
-                            self.note_snapping = (min(16, max(value, 0)), self.note_snapping[1])
+                            self.note_snapping = (min(16, max(value, 0)) if value != 1 else 0, self.note_snapping[1])
                         if imgui.is_item_hovered():
                             imgui.set_tooltip("Set to 0 to turn off snapping.")
                         imgui.same_line()
@@ -366,7 +366,7 @@ class Editor:
                         imgui.same_line()
                         changed, value = imgui.input_int("Note snapping", self.note_snapping[1], 0)
                         if changed:
-                            self.note_snapping = (self.note_snapping[0], min(16, max(value, 0)))
+                            self.note_snapping = (self.note_snapping[0], min(16, max(value, 0)) if value != 1 else 0)
                         if imgui.is_item_hovered():
                             imgui.set_tooltip("Set to 0 to turn off snapping.")
                         imgui.pop_item_width()
@@ -494,13 +494,13 @@ class Editor:
                                 max(min((((x + int(w * start)) + (x + int(w * end) + 1)) / 2) - (text_width / 2), w - text_width), text_width / 2),
                                 y + h - 70, 0x80FFFFFF, f"{self.time/1000:.3f}")
                             if self.bpm_markers and self.bpm:
-                                ms_per_beat = 60000 / (self.bpm * (self.time_signature[0] / 4))
-                                m_text = f"Measure {(self.time + self.offset) // (ms_per_beat * self.time_signature[0]):.0f}"
+                                ms_per_beat = 60000 / (self.bpm * (self.time_signature[1] / 4) * (self.time_signature[0]))
+                                m_text = f"Measure {((self.time + self.offset) / (ms_per_beat * (self.time_signature[0]))) // self.time_signature[0]:.0f}"
                                 text_width = imgui.calc_text_size(m_text).x
                                 draw_list.add_text(
                                     max(min((((x + int(w * start)) + (x + int(w * end) + 1)) / 2) - (text_width / 2), w - text_width), text_width / 2),
                                     y + h - 110, 0x80FFFFFF, m_text)
-                                b_text = f"Beat {((self.time + self.offset) / ms_per_beat) % self.time_signature[0]:.2f}"
+                                b_text = f"Beat {((self.time + self.offset) / (ms_per_beat * (self.time_signature[0]))) % self.time_signature[0]:.2f}"
                                 b_text = b_text.rstrip("0.") if b_text != "Beat 0.00" else "Beat 0"
                                 text_width = imgui.calc_text_size(b_text).x
                                 draw_list.add_text(
@@ -522,7 +522,9 @@ class Editor:
                                             self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
                                             self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
-                                            (0xff000000 if i % self.time_signature[0] == 0 else 0x80000000) | int(0xFF * line_prog), thickness=int((4 if i % self.time_signature[0] == 0 else 2) * line_prog))
+                                            (0xff000000 if (i // self.time_signature[0]) % self.time_signature[0] == 0 and i % self.time_signature[0] == 0 else
+                                             0x80000000 if i % self.time_signature[0] == 0 else
+                                             0x40000000) | int(0xFF * line_prog), thickness=int((4 if i % self.time_signature[0] == 0 else 2) * line_prog))
                                         rects_drawn += 1
 
                             times_to_display = times_to_display[np.logical_and(times_to_display >= self.time - 1,

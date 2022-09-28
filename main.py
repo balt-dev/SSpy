@@ -21,48 +21,53 @@ def main():
     try:
         editor.start(window, impl, font, gl_ctx)
     except:
+        exc = traceback.format_exc()
         try:
-            imgui.core.pop_font()
-        except:
-            pass
-        try:
+            try:
+                imgui.core.pop_font()
+            except:
+                pass
             imgui.end_frame()
+            with open("log.txt", "w+") as log:
+                sys.stdout = log
+                traceback.print_exc()
+                sys.stdout = sys.__stdout__
+            impl.shutdown()
+            sdl2.SDL_GL_DeleteContext(gl_ctx)
+            sdl2.SDL_DestroyWindow(window)
+            sdl2.SDL_Quit()
+            window, gl_ctx = init()
+            impl = SDL2Renderer(window)
+            event = sdl2.SDL_Event()
+            run = True
+            while run:
+                while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
+                    if event.type == sdl2.SDL_QUIT:
+                        run = False
+                    impl.process_event(event)
+                size = imgui.get_io().display_size
+                impl.process_inputs()
+                imgui.new_frame()
+                imgui.set_next_window_size(size[0], size[1])
+                imgui.set_next_window_position(0, 0)
+                imgui.begin("A fatal error occurred.", True)
+                imgui.text(f"""Sorry, but an error occurred and the program was stopped.
+    Please report this to @balt#6423 on Discord.
+    """)
+
+                imgui.core.input_text_multiline("", exc, len(exc), imgui.INPUT_TEXT_READ_ONLY)
+                gl.glClearColor(0., 0., 0., 1)
+                gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                imgui.end()
+                imgui.render()
+                impl.render(imgui.get_draw_data())
+                sdl2.SDL_GL_SwapWindow(window)
         except:
-            pass
-        with open("log.txt", "w+") as log:
-            sys.stdout = log
-            traceback.print_exc()
-            sys.stdout = sys.__stdout__
-        impl.shutdown()
-        sdl2.SDL_GL_DeleteContext(gl_ctx)
-        sdl2.SDL_DestroyWindow(window)
-        sdl2.SDL_Quit()
-        window, gl_ctx = init()
-        impl = SDL2Renderer(window)
-        event = sdl2.SDL_Event()
-        run = True
-        while run:
-            while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
-                if event.type == sdl2.SDL_QUIT:
-                    run = False
-                impl.process_event(event)
-            size = imgui.get_io().display_size
-            impl.process_inputs()
-            imgui.new_frame()
-            imgui.set_next_window_size(size[0], size[1])
-            imgui.set_next_window_position(0, 0)
-            imgui.begin("A fatal error occurred.", True)
-            imgui.text(f"""Sorry, but an error occurred and the program was stopped.
-Please report this to @balt#6423 on Discord.
-""")
-            exc = traceback.format_exc()
-            imgui.core.input_text_multiline("", exc, len(exc), imgui.INPUT_TEXT_READ_ONLY)
-            gl.glClearColor(0., 0., 0., 1)
-            gl.glClear(gl.GL_COLOR_BUFFER_BIT)
-            imgui.end()
-            imgui.render()
-            impl.render(imgui.get_draw_data())
-            sdl2.SDL_GL_SwapWindow(window)
+            print("If you're seeing this, both the app and the error handler threw an error. Not great.")
+            print("Please send this traceback to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
+            print("---------")
+            print(exc)
+            print("---------")
 
     impl.shutdown()
     sdl2.SDL_GL_DeleteContext(gl_ctx)
