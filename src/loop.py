@@ -154,13 +154,13 @@ class Editor:
                 # Don't base scrolling on the current BPM and time signature
                 increment = 0.1
             else:
-                increment = (60 / self.bpm) * (4 / self.time_signature[1])
+                increment = (60 / self.bpm) * (4 / self.time_signature[1])  # Step one beat
             if keys[sdl2.SDL_SCANCODE_LSHIFT] or keys[
                     sdl2.SDL_SCANCODE_RSHIFT]:
-                increment *= self.time_signature[0] if use_bpm else 10
+                increment *= self.time_signature[0] if use_bpm else 10  # Step one measure
             elif keys[sdl2.SDL_SCANCODE_LCTRL] or keys[
                     sdl2.SDL_SCANCODE_RCTRL]:
-                increment *= 0.25  # Take a quarter step
+                increment *= 0.25  # Step a quarter beat
             delta = increment * 1000 * y
             old_time = self.time
             self.time = max(self.time + delta, 0)
