@@ -5,3 +5,5 @@ numpy~=1.23.3
 Pillow
 pydub~=0.25.1
 simpleaudio
+pyopengl
+ffmpeg
