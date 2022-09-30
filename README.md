@@ -3,15 +3,24 @@
 
 
 ---
+## Roadmap
+- [x] Basic functionality
+  - [x] Loading/Saving
+  - [x] Timeline
+  - [x] Note display
+- [x] Note placing and removing
+- [x] Audio playing
+  - [x] BPM markers
+- [ ] Waveform on timeline
+- [ ] .txt map save/load support
+- [ ] Optimizations for low-end devices
+- [ ] Vulnus .zip support
+
 ## FAQ:
-> What's planned?
 
-Opening .sspm maps and raw text maps, and saving as .sspm files.\
-Quantum notes will obviously be supported, but beziers might be annoying.
+> Why is Vulnus support at the back of the roadmap?
 
-> Why is there no Vulnus support?
-
-Don't get me started.
+To put it bluntly: I don't like Vulnus. 
 
 > How do I run it?
 
