@@ -15,7 +15,7 @@ Don't get me started.
 
 > How do I run it?
 
-Install git, python, and ffmpeg if you haven't, then
+Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
 ```
 git clone [url] sspy
 cd sspy
