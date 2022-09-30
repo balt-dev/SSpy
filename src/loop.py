@@ -23,7 +23,6 @@ from src.level import Level
 with Image.open("assets/nocover.png") as im:
     NO_COVER = im.copy()
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
-TIMELINE_HEIGHT: int = 50
 HITSOUND = AudioSegment.from_file("assets/hit.wav").set_sample_width(2)
 
 
@@ -69,6 +68,8 @@ class Editor:
         self.vsync = False
         self.rects_drawn = 0
         self.volume = 0
+        self.waveform_res = 4
+        self.timeline_height = 50
 
     def file_display(self, extensions):
         """Create a file select window."""
@@ -193,7 +194,7 @@ class Editor:
             if self.level is not None:
                 if self.level.audio is not None:
                     if hash(self.level.audio) != old_audio:
-                        audio_data = np.array(self.level.audio.get_array_of_samples(), dtype=np.int16)
+                        audio_data = np.array(self.level.audio.get_array_of_samples())
                         old_audio = hash(self.level.audio)
             impl.process_inputs()
             imgui.new_frame()
@@ -365,6 +366,12 @@ class Editor:
                         changed, value = imgui.checkbox("Draw audio on timeline?", self.draw_audio)
                         if changed:
                             self.draw_audio = value
+                        if self.draw_audio:
+                            imgui.indent()
+                            changed, value = imgui.slider_int("Waveform resolution (px)", self.waveform_res, 1, 20)
+                            if changed:
+                                self.waveform_res = value
+                            imgui.unindent()
                         imgui.separator()
                         changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
                         if changed:
@@ -508,14 +515,16 @@ class Editor:
                     size = self.io.display_size
                     imgui.set_next_window_size(size[0], size[1] - 26)
                     imgui.set_next_window_position(0, 26)
+                    mouse_pos = tuple(self.io.mouse_pos)
                     if imgui.core.begin("Level",
                                         flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS):
-                        if imgui.begin_child("nodrag", 0, 0, False, ):
+                        x, y = imgui.get_window_position()
+                        w, h = imgui.get_content_region_available()
+                        if imgui.begin_child("nodrag", 0, 0, False):
                             draw_list = imgui.get_window_draw_list()
-                            x, y = imgui.get_window_position()
-                            w, h = imgui.get_content_region_available()
+                            timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
                             # Draw the main UI background
-                            square_side = min(w - TIMELINE_HEIGHT, h - TIMELINE_HEIGHT)
+                            square_side = min(w - self.timeline_height, h - self.timeline_height)
                             draw_list.add_rect_filled(x, y, x + w, y + h, 0xff080808)
                             adjusted_x = (((x + w) / 2) - (square_side / 2))
                             draw_list.add_rect_filled(adjusted_x, y, adjusted_x + square_side, y + square_side,
@@ -523,37 +532,36 @@ class Editor:
                             draw_list.add_rect_filled(x, (y + h) - 50, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
                             times_to_display = np.array(tuple(self.level.notes.keys()), dtype=np.uint32)
-                            ending_time = self.level.get_end()
                             if self.level.audio is not None and audio_data is not None and self.draw_audio:
-                                center = (y + h) - (TIMELINE_HEIGHT / 2)
-                                length = int(self.level.audio.frame_rate * (max(ending_time + 1000, self.time) / 1000))
+                                center = (y + h) - (self.timeline_height / 2)
+                                length = int(self.level.audio.frame_rate * ((self.time + self.approach_rate) / 1000))
                                 extent = np.max(np.abs(audio_data))
                                 waveform_width = int(
                                     size[0])
                                 # Draw waveform
-                                for n in range(waveform_width):
-                                    index = math.floor((n / waveform_width) * length * 2)
+                                for n in range(0, waveform_width, self.waveform_res):
+                                    audio_slice = slice(math.floor((n / waveform_width) * length * 2),
+                                                        math.floor(((n + 1) / waveform_width) * length * 2))
                                     try:
-                                        sample = audio_data[index]
+                                        sample = audio_data[audio_slice]
                                         draw_list.add_rect_filled(x + int((w / waveform_width) * n),
-                                                                  center - int((sample / extent) * 25),
-                                                                  x + int((w / waveform_width) * n) + 1,
-                                                                  center + int((sample / extent) * 25), 0x20ffffff)
+                                                                  center + int((np.max(sample) / extent) * (self.timeline_height // 2)),
+                                                                  x + int((w / waveform_width) * n) + self.waveform_res,
+                                                                  center + int((np.min(sample) / extent) * (self.timeline_height // 2)), 0x20ffffff)
                                         self.rects_drawn += 1
                                     except IndexError:
                                         break
                             if self.draw_notes:
                                 # Draw notes
                                 for note in times_to_display:
-                                    progress = note / max(ending_time + 1000, self.time + self.approach_rate, 1)
+                                    progress = note / timeline_width
                                     progress = progress if not math.isnan(progress) else 1
                                     draw_list.add_rect_filled(x + int(w * progress), (y + h) - 50,
                                                               x + int(w * progress) + 1, (y + h), 0x40ffffff)
                                     self.rects_drawn += 1
                             # Draw currently visible area on timeline
-                            start = (self.time) / max(ending_time + 1000, self.time + self.approach_rate, 1)
-                            end = (self.time + self.approach_rate) / max(ending_time + 1000,
-                                                                         self.time + self.approach_rate, 1)
+                            start = (self.time) / timeline_width
+                            end = (self.time + self.approach_rate) / timeline_width
                             draw_list.add_rect(x + int(w * start), (y + h) - 50, x + int(w * end) + 1,
                                                (y + h), 0x80ffffff, thickness=3)
                             self.rects_drawn += 1
@@ -582,9 +590,9 @@ class Editor:
                                     y + h - 90, 0x80FFFFFF, b_text)
 
                                 # Draw beat markers in note space
-                                closest_beat = ((self.time) // (ms_per_beat)) * (ms_per_beat) + self.offset
-                                for n in np.arange(closest_beat, (closest_beat + self.approach_rate + 1), ms_per_beat):
-                                    i = int(n // ms_per_beat)  # Current beat
+                                closest_beat = ((self.time) // (ms_per_beat)) * (ms_per_beat) - self.offset
+                                for n in np.arange(closest_beat, (closest_beat + self.approach_rate), ms_per_beat):
+                                    i = round(n / ms_per_beat)  # Current beat
                                     beat_time = (n + ((self.offset / ms_per_beat) % ms_per_beat))
                                     line_prog = max(1 - (((beat_time - (self.time)) / (self.approach_rate))), 0)
                                     if line_prog <= 1:
@@ -618,7 +626,6 @@ class Editor:
                                     _play_with_simpleaudio(HITSOUND)
                             last_notes = times_to_display
 
-                            mouse_pos = tuple(self.io.mouse_pos)
                             level_was_hovered = imgui.is_window_hovered()
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
                                     (y <= mouse_pos[1] < y + square_side)) and level_was_hovered:
@@ -630,6 +637,7 @@ class Editor:
                                 closest_time = np.min(time_arr) if time_arr.size > 0 else self.time
                                 closest_index = None
                                 closest_dist = None
+                                # Note deletion
                                 if tuple(self.io.mouse_down)[1] and not old_mouse[1]:
                                     for i, note in enumerate(self.level.notes.get(closest_time, ())):
                                         if abs(note[0] - note_pos[0]) < 0.5 and abs(note[1] - note_pos[1]) < 0.5:
@@ -669,6 +677,12 @@ class Editor:
                             self.rects_drawn = 0
                         imgui.end_child()
                         imgui.end()
+                    # Resize the timeline when needed
+                    print(abs(((y + h) - mouse_pos[1]) - self.timeline_height))
+                    if abs(((y + h) - mouse_pos[1]) - self.timeline_height) <= 5:
+                        imgui.core.set_mouse_cursor(imgui.MOUSE_CURSOR_RESIZE_NS)  # S
+                    elif imgui.core.get_mouse_cursor() == imgui.MOUSE_CURSOR_RESIZE_NS:
+                        imgui.core.set_mouse_cursor(imgui.MOUSE_CURSOR_NONE)
 
             old_mouse = tuple(self.io.mouse_down)
             if self.error is not None:
@@ -685,7 +699,6 @@ class Editor:
             imgui.render()
             impl.render(imgui.get_draw_data())
             sdl2.SDL_GL_SwapWindow(window)
-
             if self.playing:
                 self.time = ((time.perf_counter_ns() - self.starting_time) / 1000000) + self.starting_position
 
