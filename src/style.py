@@ -31,7 +31,7 @@ def set(style: imgui.core.GuiStyle):
     style.grab_rounding = 2
     style.frame_rounding = 2
     style.frame_border_size = 0
-    style.child_border_size = 0.1
+    style.child_border_size = 0
     style.window_border_size = 0
     style.window_min_size = (150, 176)
     return io.fonts.add_font_from_file_ttf(

@@ -70,6 +70,7 @@ class Editor:
         self.volume = 0
         self.waveform_res = 4
         self.timeline_height = 50
+        self.hitsound_offset = 0
 
     def file_display(self, extensions):
         """Create a file select window."""
@@ -150,7 +151,7 @@ class Editor:
         if self.level is not None:
             # Check modifier keys
             use_bpm = not (keys[sdl2.SDL_SCANCODE_LALT] or keys[sdl2.SDL_SCANCODE_RALT]) and (
-                self.bpm_markers and self.bpm)  # If either alt key is pressed, or there's no bpm markers to base it off of
+                self.bpm != 0)  # If either alt key is pressed, or there's no bpm markers to base it off of
             if not use_bpm:
                 # Don't base scrolling on the current BPM and time signature
                 increment = 0.1
@@ -174,7 +175,6 @@ class Editor:
 
     def start(self, window, impl, font, *_):
         self.io = imgui.get_io()
-        self.io.config_resize_windows_from_edges = True
 
         event = sdl2.SDL_Event()
 
@@ -184,6 +184,7 @@ class Editor:
         space_last = False
         was_playing = False
         level_was_hovered = False
+        was_resizing_timeline = False
         last_notes = np.zeros((0), dtype=np.int64)
         old_mouse = (0, 0, 0, 0, 0)
         self.load_image(NO_COVER)
@@ -199,6 +200,7 @@ class Editor:
             impl.process_inputs()
             imgui.new_frame()
             keys = self.keys()
+            mouse = tuple(self.io.mouse_down)
             # Check if the song needs to be paused/played
             if keys[sdl2.SDLK_SPACE] and self.level is not None:
                 if not space_last:
@@ -241,12 +243,12 @@ class Editor:
                             running = False
                         else:
                             imgui.open_popup("quit.ensure")
-                    if event.type == sdl2.SDL_MOUSEWHEEL and level_was_hovered:
+                    if event.type == sdl2.SDL_MOUSEWHEEL and level_was_hovered and not self.playing:
                         self.time_scroll(event.wheel.y, keys)
                     impl.process_event(event)
                 menu_choice = None
                 # Handle file keybinds
-                if self.io.key_ctrl:
+                if keys[sdl2.SDL_SCANCODE_LCTRL] or keys[sdl2.SDL_SCANCODE_RCTRL]:
                     if keys[sdl2.SDLK_n]:
                         # CTRL + N : New
                         self.level = Level()
@@ -356,9 +358,9 @@ class Editor:
                             self.vsync = value
                         if not self.vsync:
                             imgui.indent()
-                            changed, value = imgui.slider_float("FPS Cap", float(self.fps_cap), 15, 360, "%.0f", 3)
+                            changed, value = imgui.slider_int("FPS Cap", self.fps_cap, 15, 360)
                             if changed:
-                                self.fps_cap = int(value)
+                                self.fps_cap = value
                             imgui.unindent()
                         changed, value = imgui.checkbox("Draw notes on timeline?", self.draw_notes)
                         if changed:
@@ -373,17 +375,21 @@ class Editor:
                                 self.waveform_res = value
                             imgui.unindent()
                         imgui.separator()
-                        changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
+                        changed, value = imgui.input_float("BPM", self.bpm, 0)
                         if changed:
-                            self.bpm_markers = value
-                        if self.bpm_markers:
+                            self.bpm = value
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off beat snapping.")
+                        if self.bpm != 0:
                             imgui.indent()
-                            changed, value = imgui.input_int("Marker Offset (ms)", self.offset, 0)
+                            changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
                             if changed:
-                                self.offset = value
-                            changed, value = imgui.input_float("BPM", self.bpm, 0)
-                            if changed:
-                                self.bpm = value
+                                self.bpm_markers = value
+                            if self.bpm_markers:
+                                changed, value = imgui.input_int("Marker Offset (ms)", self.offset, 0)
+                                if changed:
+                                    self.offset = value
+                            imgui.unindent()
                             imgui.push_item_width(49)
                             # Display time signature
                             changed, value = imgui.input_int("", self.time_signature[0], 0)
@@ -396,7 +402,6 @@ class Editor:
                             if changed:
                                 self.time_signature = (
                                     self.time_signature[0], min(max(1 << (value - 1).bit_length(), 1), 256))
-                            imgui.unindent()
                         else:
                             imgui.push_item_width(49)
                         imgui.separator()
@@ -428,7 +433,7 @@ class Editor:
                             if changed:
                                 self.time = value
                         if self.level.audio is not None:
-                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 0.001, "%.1f", 3)
+                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 0.001, "%.1f")
                             if changed:
                                 self.volume = value
                                 # Change the volume of the song if it's playing
@@ -438,6 +443,12 @@ class Editor:
                         changed, value = imgui.checkbox("Play hitsounds?", self.hitsounds)
                         if changed:
                             self.hitsounds = value
+                        if self.hitsounds:
+                            imgui.indent()
+                            changed, value = imgui.input_int("Hitsound offset (ms)", self.hitsound_offset, 0)
+                            if changed:
+                                self.hitsound_offset = value
+                            imgui.unindent()
                         imgui.pop_item_width()
                         imgui.end_menu()
                     imgui.end_main_menu_bar()
@@ -516,11 +527,12 @@ class Editor:
                     imgui.set_next_window_size(size[0], size[1] - 26)
                     imgui.set_next_window_position(0, 26)
                     mouse_pos = tuple(self.io.mouse_pos)
+                    imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
                     if imgui.core.begin("Level",
                                         flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_TITLE_BAR | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_BRING_TO_FRONT_ON_FOCUS):
                         x, y = imgui.get_window_position()
                         w, h = imgui.get_content_region_available()
-                        if imgui.begin_child("nodrag", 0, 0, False):
+                        if imgui.begin_child("nodrag", 0, 0, False, ):
                             draw_list = imgui.get_window_draw_list()
                             timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
                             # Draw the main UI background
@@ -529,40 +541,40 @@ class Editor:
                             adjusted_x = (((x + w) / 2) - (square_side / 2))
                             draw_list.add_rect_filled(adjusted_x, y, adjusted_x + square_side, y + square_side,
                                                       0xff000000)
-                            draw_list.add_rect_filled(x, (y + h) - 50, x + w, (y + h), 0x20ffffff)
+                            draw_list.add_rect_filled(x, (y + h) - self.timeline_height, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
                             times_to_display = np.array(tuple(self.level.notes.keys()), dtype=np.uint32)
-                            if self.level.audio is not None and audio_data is not None and self.draw_audio:
+                            if (self.level.audio is not None and audio_data is not None
+                                    and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
-                                length = int(self.level.audio.frame_rate * ((self.time + self.approach_rate) / 1000))
+                                length = int(self.level.audio.frame_rate * timeline_width / 1000)
                                 extent = np.max(np.abs(audio_data))
                                 waveform_width = int(
                                     size[0])
                                 # Draw waveform
                                 for n in range(0, waveform_width, self.waveform_res):
-                                    audio_slice = slice(math.floor((n / waveform_width) * length * 2),
-                                                        math.floor(((n + 1) / waveform_width) * length * 2))
                                     try:
-                                        sample = audio_data[audio_slice]
+                                        # Slice a segment of audio
+                                        sample = audio_data[math.floor((n / waveform_width) * length * 2): math.floor(((n + 1) / waveform_width) * length * 2)]
                                         draw_list.add_rect_filled(x + int((w / waveform_width) * n),
                                                                   center + int((np.max(sample) / extent) * (self.timeline_height // 2)),
                                                                   x + int((w / waveform_width) * n) + self.waveform_res,
                                                                   center + int((np.min(sample) / extent) * (self.timeline_height // 2)), 0x20ffffff)
                                         self.rects_drawn += 1
-                                    except IndexError:
+                                    except (IndexError, ValueError):
                                         break
                             if self.draw_notes:
                                 # Draw notes
                                 for note in times_to_display:
                                     progress = note / timeline_width
                                     progress = progress if not math.isnan(progress) else 1
-                                    draw_list.add_rect_filled(x + int(w * progress), (y + h) - 50,
+                                    draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
                                                               x + int(w * progress) + 1, (y + h), 0x40ffffff)
                                     self.rects_drawn += 1
                             # Draw currently visible area on timeline
                             start = (self.time) / timeline_width
                             end = (self.time + self.approach_rate) / timeline_width
-                            draw_list.add_rect(x + int(w * start), (y + h) - 50, x + int(w * end) + 1,
+                            draw_list.add_rect(x + int(w * start), (y + h) - self.timeline_height, x + int(w * end) + 1,
                                                (y + h), 0x80ffffff, thickness=3)
                             self.rects_drawn += 1
 
@@ -575,27 +587,27 @@ class Editor:
                             # Draw the current time above the visible area
                             draw_list.add_text(
                                 center_of_view(f"{self.time / 1000:.3f}"),
-                                y + h - 70, 0x80FFFFFF, f"{self.time / 1000:.3f}")
-                            if self.bpm_markers and self.bpm:
+                                y + h - (self.timeline_height + 20), 0x80FFFFFF, f"{self.time / 1000:.3f}")
+                            if self.bpm:
                                 # Draw the current measure and beat
                                 ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
                                 current_beat = (self.time - self.offset) / (ms_per_beat)
                                 m_text = f"Measure {current_beat // self.time_signature[0]:.0f}"
                                 draw_list.add_text(
                                     center_of_view(m_text),
-                                    y + h - 110, 0x80FFFFFF, m_text)
+                                    y + h - (self.timeline_height + 60), 0x80FFFFFF, m_text)
                                 b_text = f"Beat {f'{current_beat % self.time_signature[0]:.2f}'.rstrip('0').rstrip('.')}"
                                 draw_list.add_text(
                                     center_of_view(b_text),
-                                    y + h - 90, 0x80FFFFFF, b_text)
+                                    y + h - (self.timeline_height + 40), 0x80FFFFFF, b_text)
 
                                 # Draw beat markers in note space
-                                closest_beat = ((self.time) // (ms_per_beat)) * (ms_per_beat) - self.offset
-                                for n in np.arange(closest_beat, (closest_beat + self.approach_rate), ms_per_beat):
-                                    i = round(n / ms_per_beat)  # Current beat
-                                    beat_time = (n + ((self.offset / ms_per_beat) % ms_per_beat))
-                                    line_prog = max(1 - (((beat_time - (self.time)) / (self.approach_rate))), 0)
-                                    if line_prog <= 1:
+                                if self.bpm_markers:
+                                    closest_beat = (((self.time) // (ms_per_beat)) * (ms_per_beat)) - ((- self.offset) % ms_per_beat)
+                                    for n in np.arange(closest_beat, (closest_beat + self.approach_rate), ms_per_beat):
+                                        i = (self.time - self.offset) / ms_per_beat  # Current beat
+                                        line_prog = (i + 1) % 1
+                                        i = math.ceil(i)
                                         position = (adjusted_x + adjusted_x + square_side) // 2, (
                                             y + y + square_side) // 2
                                         draw_list.add_rect(
@@ -604,33 +616,43 @@ class Editor:
                                             self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
                                             (0xff000000 if i % self.time_signature[0] == 0 else
-                                             0x80000000) | int(0xFF * line_prog),
+                                                0x80000000) | int(0xFF * line_prog),
                                             thickness=int((4 if i % self.time_signature[0] == 0 else 2) * line_prog))
                                         self.rects_drawn += 1
 
+                            # HACK: Copy the times display for hitsound offsets
+                            hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time - self.hitsound_offset - 1,
+                                                                             (times_to_display) < (
+                                                                                 self.time + self.approach_rate - self.hitsound_offset))].flatten()
+                            last_hitsound_times = last_notes[np.logical_and(last_notes >= self.time - self.hitsound_offset - 1,
+                                                                            (last_notes) < (
+                                                                                self.time + self.approach_rate - self.hitsound_offset))].flatten()
+
                             # Draw notes on note space
-                            times_to_display = times_to_display[np.logical_and(times_to_display >= self.time - 1,
-                                                                               (times_to_display) < (
-                                                                                   self.time + self.approach_rate))].flatten()
-                            for note_time in times_to_display[::-1]:
+                            note_times = times_to_display[np.logical_and(times_to_display >= self.time - 1,
+                                                                         (times_to_display) < (
+                                                                             self.time + self.approach_rate))].flatten()
+                            for note_time in note_times[::-1]:
                                 for note in self.level.notes[note_time]:
                                     progress = 1 - ((note_time - self.time) / self.approach_rate)
                                     self.draw_note(draw_list, note,
                                                    (adjusted_x, y, adjusted_x + square_side, y + square_side), progress)
                                     self.rects_drawn += 1
 
+                            print(last_hitsound_times, hitsound_times)
                             # Play note hit sound
                             if self.playing:
-                                if last_notes.size and times_to_display.size and np.min(last_notes) < np.min(
-                                        times_to_display):
+                                if ((last_hitsound_times.size and hitsound_times.size and
+                                    np.min(last_hitsound_times) < np.min(hitsound_times)) or
+                                        (last_hitsound_times.size > 0 and hitsound_times.size == 0)):
                                     _play_with_simpleaudio(HITSOUND)
                             last_notes = times_to_display
 
                             level_was_hovered = imgui.is_window_hovered()
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
                                     (y <= mouse_pos[1] < y + square_side)) and level_was_hovered:
-                                note_pos = ((((mouse_pos[0] - (adjusted_x + 10)) / (square_side - 10)) * 3) - 0.5,
-                                            (((mouse_pos[1] - (y + 10)) / (square_side - 10)) * 3) - 0.5)
+                                note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * 3) - 0.5,
+                                            (((mouse_pos[1] - (y)) / (square_side)) * 3) - 0.5)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
                                 time_arr = time_arr[
                                     np.logical_and(time_arr - self.time >= -1, time_arr - self.time < 10)]
@@ -638,7 +660,7 @@ class Editor:
                                 closest_index = None
                                 closest_dist = None
                                 # Note deletion
-                                if tuple(self.io.mouse_down)[1] and not old_mouse[1]:
+                                if mouse[1] and not old_mouse[1]:
                                     for i, note in enumerate(self.level.notes.get(closest_time, ())):
                                         if abs(note[0] - note_pos[0]) < 0.5 and abs(note[1] - note_pos[1]) < 0.5:
                                             if closest_dist is None:
@@ -662,7 +684,7 @@ class Editor:
                                                    (adjusted_x, y, adjusted_x + square_side, y + square_side), 1.0,
                                                    color=0xffff00, alpha=0x40)
                                     self.rects_drawn += 1
-                                    if tuple(self.io.mouse_down)[0] and not old_mouse[0]:
+                                    if mouse[0] and not old_mouse[0]:
                                         if int(self.time) in self.level.notes:
                                             self.level.notes[int(self.time)].append(note_pos)
                                         else:
@@ -670,21 +692,23 @@ class Editor:
                             # Draw current statistics
                             fps_text = f"{int(self.io.framerate)}{f'/{self.fps_cap}' if not self.vsync else ''} FPS"
                             fps_size = imgui.calc_text_size(fps_text)
-                            draw_list.add_text(w - fps_size.x, y, 0x80FFFFFF, fps_text)
+                            draw_list.add_text(w - fps_size.x - 4, y + 2, 0x80FFFFFF, fps_text)
                             rdtf_size = imgui.calc_text_size(f"{self.rects_drawn} rects drawn")
-                            draw_list.add_text(w - rdtf_size.x, y + fps_size.y, 0x80FFFFFF,
+                            draw_list.add_text(w - rdtf_size.x - 4, y + fps_size.y + 2, 0x80FFFFFF,
                                                f"{self.rects_drawn} rects drawn")
                             self.rects_drawn = 0
                         imgui.end_child()
                         imgui.end()
+                    imgui.pop_style_var(imgui.STYLE_WINDOW_PADDING)
                     # Resize the timeline when needed
-                    print(abs(((y + h) - mouse_pos[1]) - self.timeline_height))
-                    if abs(((y + h) - mouse_pos[1]) - self.timeline_height) <= 5:
-                        imgui.core.set_mouse_cursor(imgui.MOUSE_CURSOR_RESIZE_NS)  # S
-                    elif imgui.core.get_mouse_cursor() == imgui.MOUSE_CURSOR_RESIZE_NS:
-                        imgui.core.set_mouse_cursor(imgui.MOUSE_CURSOR_NONE)
+                    if abs(((y + h) - mouse_pos[1]) - self.timeline_height) <= 5 or was_resizing_timeline:
+                        draw_list.add_rect_filled(x, (y + h - 3) - self.timeline_height, x + w, (y + h + 2) - self.timeline_height, 0xffff8040)
+                        was_resizing_timeline = False
+                        if mouse[0]:
+                            was_resizing_timeline = True
+                            self.timeline_height = max(5, (y + h) - mouse_pos[1])
 
-            old_mouse = tuple(self.io.mouse_down)
+            old_mouse = mouse
             if self.error is not None:
                 imgui.open_popup(self.error.__class__.__name__)
             if imgui.begin_popup(self.error.__class__.__name__):

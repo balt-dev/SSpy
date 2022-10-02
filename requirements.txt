@@ -1,4 +1,5 @@
-imgui~=1.4.1
+wheel
+imgui
 pysdl2
 pysdl2-dll
 numpy~=1.23.3
