@@ -3,19 +3,28 @@
 
 
 ---
+## Roadmap
+- [x] Basic functionality
+  - [x] Loading/Saving
+  - [x] Timeline
+  - [x] Note display
+- [x] Note placing and removing
+- [x] Audio playing
+  - [x] BPM markers
+- [ ] Waveform on timeline
+- [ ] .txt map save/load support
+- [ ] Optimizations for low-end devices
+- [ ] Vulnus .zip support
+
 ## FAQ:
-> What's planned?
 
-Opening .sspm maps and raw text maps, and saving as .sspm files.\
-Quantum notes will obviously be supported, but beziers might be annoying.
+> Why is Vulnus support at the back of the roadmap?
 
-> Why is there no Vulnus support?
-
-Don't get me started.
+To put it bluntly: I don't like Vulnus. 
 
 > How do I run it?
 
-Install git and python if you haven't, then
+Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
 ```
 git clone [url] sspy
 cd sspy
@@ -25,7 +34,7 @@ python main.py
 
 ## Notes:
 
-Some GUI code taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1] This is code that I (if my memory isn't failing me) contributed to said repository.
+The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]
 
 
 [1]: https://i.imgur.com/7JyRsjb.png (Permission proof)
