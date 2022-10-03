@@ -5,6 +5,7 @@ import os
 import time
 import traceback
 from io import BytesIO
+import webbrowser
 
 import numpy as np
 import sdl2
@@ -19,6 +20,8 @@ from pydub import AudioSegment
 from pydub.playback import _play_with_simpleaudio
 
 from src.level import Level
+
+# Initialize constants
 
 with Image.open("assets/nocover.png") as im:
     NO_COVER = im.copy()
@@ -184,10 +187,21 @@ class Editor:
         space_last = False
         was_playing = False
         level_was_hovered = False
+        source_code_was_open = False
         was_resizing_timeline = False
         last_notes = np.zeros((0), dtype=np.int64)
         old_mouse = (0, 0, 0, 0, 0)
         self.load_image(NO_COVER)
+        # Load the Github icon (this doesn't work elsewhere)
+        with Image.open("assets/github.png") as im:
+            texture_data = im.tobytes()  # Get the image's raw data for GL
+            GITHUB_ICON_ID = GL.glGenTextures(1)
+            # Bind and set the texture at the id
+            GL.glBindTexture(GL.GL_TEXTURE_2D, GITHUB_ICON_ID)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 32, 32, 0, GL.GL_RGBA,
+                            GL.GL_UNSIGNED_BYTE, texture_data)
         while running:
             self.rects_drawn = 0
             dt = time.perf_counter_ns()
@@ -334,7 +348,7 @@ class Editor:
                             self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
                                                                                                                 "_")
                         imgui.separator()
-                        clicked = imgui.image_button(self.cover_id, 150, 150)
+                        clicked = imgui.image_button(self.cover_id, 150, 150, frame_padding=0)
                         if clicked:
                             menu_choice = "edit.cover"
                         if imgui.is_item_hovered():
@@ -451,6 +465,10 @@ class Editor:
                             imgui.unindent()
                         imgui.pop_item_width()
                         imgui.end_menu()
+                    source_code_was_open = imgui.core.image_button(GITHUB_ICON_ID, 26, 26, frame_padding=0)
+                    if source_code_was_open:
+                        webbrowser.open("https://github.com/balt-is-you-and-shift/SSpy", 2, autoraise=True)
+                        source_code_was_open = False
                     imgui.end_main_menu_bar()
                 if menu_choice == "file.open":
                     imgui.open_popup("file.open")
@@ -543,6 +561,7 @@ class Editor:
                                                       0xff000000)
                             draw_list.add_rect_filled(x, (y + h) - self.timeline_height, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
+
                             times_to_display = np.array(tuple(self.level.notes.keys()), dtype=np.uint32)
                             if (self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
