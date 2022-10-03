@@ -11,7 +11,7 @@
 - [x] Note placing and removing
 - [x] Audio playing
   - [x] BPM markers
-- [ ] Waveform on timeline
+- [x] Waveform on timeline
 - [ ] .txt map save/load support
 - [ ] Optimizations for low-end devices
 - [ ] Vulnus .zip support
