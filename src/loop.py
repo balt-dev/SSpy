@@ -658,7 +658,6 @@ class Editor:
                                                    (adjusted_x, y, adjusted_x + square_side, y + square_side), progress)
                                     self.rects_drawn += 1
 
-                            print(last_hitsound_times, hitsound_times)
                             # Play note hit sound
                             if self.playing:
                                 if ((last_hitsound_times.size and hitsound_times.size and
