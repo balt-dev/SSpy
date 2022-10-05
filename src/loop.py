@@ -369,112 +369,110 @@ class Editor:
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Preferences and Tools", self.level is not None):
-                        if imgui.begin_child("prefs-and-tools", 400, 450):
-                            imgui.push_item_width(120)
-                            changed, value = imgui.checkbox("Vsync?", self.vsync)
+                        imgui.push_item_width(120)
+                        changed, value = imgui.checkbox("Vsync?", self.vsync)
+                        if changed:
+                            sdl2.SDL_GL_SetSwapInterval(int(value))  # Turn on/off VSync
+                            self.vsync = value
+                        if not self.vsync:
+                            imgui.indent()
+                            changed, value = imgui.slider_int("FPS Cap", self.fps_cap, 15, 360)
                             if changed:
-                                sdl2.SDL_GL_SetSwapInterval(int(value))  # Turn on/off VSync
-                                self.vsync = value
-                            if not self.vsync:
+                                self.fps_cap = value
+                            imgui.unindent()
+                        changed, value = imgui.checkbox("Draw notes on timeline?", self.draw_notes)
+                        if changed:
+                            self.draw_notes = value
+                        changed, value = imgui.checkbox("Draw audio on timeline?", self.draw_audio)
+                        if changed:
+                            self.draw_audio = value
+                        if self.draw_audio:
+                            imgui.indent()
+                            changed, value = imgui.slider_int("Waveform resolution (px)", self.waveform_res, 1, 20)
+                            if changed:
+                                self.waveform_res = value
+                            imgui.unindent()
+                        imgui.separator()
+                        changed, value = imgui.input_float("BPM", self.bpm, 0)
+                        if changed:
+                            self.bpm = value
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off beat snapping.")
+                        if self.bpm != 0:
+                            imgui.indent()
+                            changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
+                            if changed:
+                                self.bpm_markers = value
+                            if self.bpm_markers:
                                 imgui.indent()
-                                changed, value = imgui.slider_int("FPS Cap", self.fps_cap, 15, 360)
+                                changed, value = imgui.input_int("Marker Offset (ms)", self.offset, 0)
                                 if changed:
-                                    self.fps_cap = value
+                                    self.offset = value
                                 imgui.unindent()
-                            changed, value = imgui.checkbox("Draw notes on timeline?", self.draw_notes)
+                            changed, value = imgui.checkbox("Metronome?", self.metronome)
                             if changed:
-                                self.draw_notes = value
-                            changed, value = imgui.checkbox("Draw audio on timeline?", self.draw_audio)
+                                self.metronome = value
+                            imgui.unindent()
+                            imgui.push_item_width(49)
+                            # Display time signature
+                            changed, value = imgui.input_int("", self.time_signature[0], 0)
                             if changed:
-                                self.draw_audio = value
-                            if self.draw_audio:
-                                imgui.indent()
-                                changed, value = imgui.slider_int("Waveform resolution (px)", self.waveform_res, 1, 20)
-                                if changed:
-                                    self.waveform_res = value
-                                imgui.unindent()
-                            imgui.separator()
-                            changed, value = imgui.input_float("BPM", self.bpm, 0)
-                            if changed:
-                                self.bpm = value
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Set to 0 to turn off beat snapping.")
-                            if self.bpm != 0:
-                                imgui.indent()
-                                changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
-                                if changed:
-                                    self.bpm_markers = value
-                                if self.bpm_markers:
-                                    imgui.indent()
-                                    changed, value = imgui.input_int("Marker Offset (ms)", self.offset, 0)
-                                    if changed:
-                                        self.offset = value
-                                    imgui.unindent()
-                                changed, value = imgui.checkbox("Metronome?", self.metronome)
-                                if changed:
-                                    self.metronome = value
-                                imgui.unindent()
-                                imgui.push_item_width(49)
-                                # Display time signature
-                                changed, value = imgui.input_int("", self.time_signature[0], 0)
-                                if changed:
-                                    self.time_signature = (value, self.time_signature[1])
-                                imgui.same_line()
-                                imgui.text("/")
-                                imgui.same_line()
-                                changed, value = imgui.input_int("Time Signature", self.time_signature[1], 0)
-                                if changed:
-                                    self.time_signature = (
-                                        self.time_signature[0], min(max(1 << (value - 1).bit_length(), 1), 256))
-                            else:
-                                imgui.push_item_width(49)
-                            imgui.separator()
-                            # Display note snapping
-                            changed, value = imgui.input_int("##", self.note_snapping[0], 0)
-                            if changed:
-                                self.note_snapping = (min(16, max(value, 0)) if value != 1 else 0, self.note_snapping[1])
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Set to 0 to turn off snapping.")
+                                self.time_signature = (value, self.time_signature[1])
                             imgui.same_line()
                             imgui.text("/")
                             imgui.same_line()
-                            changed, value = imgui.input_int("Note snapping", self.note_snapping[1], 0)
+                            changed, value = imgui.input_int("Time Signature", self.time_signature[1], 0)
                             if changed:
-                                self.note_snapping = (self.note_snapping[0], min(16, max(value, 0)) if value != 1 else 0)
-                            if imgui.is_item_hovered():
-                                imgui.set_tooltip("Set to 0 to turn off snapping.")
-                            imgui.pop_item_width()
-                            changed, value = imgui.slider_int("Approach Rate (ms)", self.approach_rate, 50, 2000)
+                                self.time_signature = (
+                                    self.time_signature[0], min(max(1 << (value - 1).bit_length(), 1), 256))
+                        else:
+                            imgui.push_item_width(49)
+                        imgui.separator()
+                        # Display note snapping
+                        changed, value = imgui.input_int("##", self.note_snapping[0], 0)
+                        if changed:
+                            self.note_snapping = (min(16, max(value, 0)) if value != 1 else 0, self.note_snapping[1])
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off snapping.")
+                        imgui.same_line()
+                        imgui.text("/")
+                        imgui.same_line()
+                        changed, value = imgui.input_int("Note snapping", self.note_snapping[1], 0)
+                        if changed:
+                            self.note_snapping = (self.note_snapping[0], min(16, max(value, 0)) if value != 1 else 0)
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Set to 0 to turn off snapping.")
+                        imgui.pop_item_width()
+                        changed, value = imgui.slider_int("Approach Rate (ms)", self.approach_rate, 50, 2000)
+                        if changed:
+                            self.approach_rate = value
+                        changed, value = imgui.slider_int("Spawn Distance (units)", self.approach_distance, 1,
+                                                          100)
+                        if changed:
+                            self.approach_distance = value
+                        imgui.separator()
+                        if not self.playing:
+                            changed, value = imgui.input_int("Position (ms)", self.time, 0)
                             if changed:
-                                self.approach_rate = value
-                            changed, value = imgui.slider_int("Spawn Distance (units)", self.approach_distance, 1,
-                                                              100)
+                                self.time = value
+                        if self.level.audio is not None:
+                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 0.001, "%.1f")
                             if changed:
-                                self.approach_distance = value
-                            imgui.separator()
-                            if not self.playing:
-                                changed, value = imgui.input_int("Position (ms)", self.time, 0)
-                                if changed:
-                                    self.time = value
-                            if self.level.audio is not None:
-                                changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 0.001, "%.1f")
-                                if changed:
-                                    self.volume = value
-                                    # Change the volume of the song if it's playing
-                                    if self.playback is not None:
-                                        self.playback.stop()
-                                        self.playback = play_at_position(self.level.audio + value, self.time / 1000)
-                            changed, value = imgui.checkbox("Play hitsounds?", self.hitsounds)
+                                self.volume = value
+                                # Change the volume of the song if it's playing
+                                if self.playback is not None:
+                                    self.playback.stop()
+                                    self.playback = play_at_position(self.level.audio + value, self.time / 1000)
+                        changed, value = imgui.checkbox("Play hitsounds?", self.hitsounds)
+                        if changed:
+                            self.hitsounds = value
+                        if self.hitsounds:
+                            imgui.indent()
+                            changed, value = imgui.input_int("Hitsound offset (ms)", self.hitsound_offset, 0)
                             if changed:
-                                self.hitsounds = value
-                            if self.hitsounds:
-                                imgui.indent()
-                                changed, value = imgui.input_int("Hitsound offset (ms)", self.hitsound_offset, 0)
-                                if changed:
-                                    self.hitsound_offset = value
-                                imgui.unindent()
-                            imgui.pop_item_width()
-                        imgui.end_child()
+                                self.hitsound_offset = value
+                            imgui.unindent()
+                        imgui.pop_item_width()
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
