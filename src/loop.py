@@ -189,7 +189,7 @@ class Editor:
         level_was_hovered = False
         source_code_was_open = False
         was_resizing_timeline = False
-        last_notes = np.zeros((0), dtype=np.int64)
+        last_hitsound_times = np.zeros((0), dtype=np.int64)
         old_mouse = (0, 0, 0, 0, 0)
         self.load_image(NO_COVER)
         # Load the Github icon (this doesn't work elsewhere)
@@ -643,9 +643,6 @@ class Editor:
                             hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time - self.hitsound_offset - 1,
                                                                              (times_to_display) < (
                                                                                  self.time + self.approach_rate - self.hitsound_offset))].flatten()
-                            last_hitsound_times = last_notes[np.logical_and(last_notes >= self.time - self.hitsound_offset - 1,
-                                                                            (last_notes) < (
-                                                                                self.time + self.approach_rate - self.hitsound_offset))].flatten()
 
                             # Draw notes on note space
                             note_times = times_to_display[np.logical_and(times_to_display >= self.time - 1,
@@ -660,11 +657,10 @@ class Editor:
 
                             # Play note hit sound
                             if self.playing:
-                                if ((last_hitsound_times.size and hitsound_times.size and
-                                    np.min(last_hitsound_times) < np.min(hitsound_times)) or
-                                        (last_hitsound_times.size > 0 and hitsound_times.size == 0)):
+                                if ((last_hitsound_times.size and
+                                        np.min(last_hitsound_times) < self.time - self.hitsound_offset - 1)):
                                     _play_with_simpleaudio(HITSOUND)
-                            last_notes = times_to_display
+                            last_hitsound_times = hitsound_times
 
                             level_was_hovered = imgui.is_window_hovered()
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
