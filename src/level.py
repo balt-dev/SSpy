@@ -38,8 +38,12 @@ class Level:
 
     @lru_cache
     def get_end(self):
-        times_to_display = np.array(tuple(self.notes.keys()), dtype=np.uint32)
+        times_to_display = self.get_notes()
         return (np.max(times_to_display) if times_to_display.shape[0] > 0 else 1000)
+
+    @lru_cache
+    def get_notes(self):
+        return np.sort(np.array(tuple(self.notes.keys()), dtype=np.int32))
 
     @classmethod
     def from_sspm(cls, file):

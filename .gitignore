@@ -4,3 +4,5 @@
 **/venv/
 **/.vscode/
 imgui.ini
+log.txt
+colors.txt

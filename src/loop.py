@@ -1,6 +1,7 @@
 import ctypes
 import glob
 import math
+from multiprocessing.sharedctypes import Value
 import os
 import time
 import traceback
@@ -21,10 +22,19 @@ from pydub.playback import _play_with_simpleaudio
 
 from src.level import Level
 
+"""
+In case you aren't aware:
+Codetags are a way of commenting that shows what the developer was doing at the time.
+Here's a list of the ones supported by VSCode:
+    NOTE: Description of how the code works (when it isn't self evident).
+    XXX: Warning about possible pitfalls.
+    HACK: Not very well written or malformed code to circumvent a problem/bug.
+    FIXME: This works, sort of, but it could be done better. (usually code written in a hurry that needs rewriting).
+    BUG: There's a problem here.
+    TODO: No problem, but additional code needs to be written, usually used when skipping something.
+"""
 # Initialize constants
 
-with Image.open("assets/nocover.png") as im:
-    NO_COVER = im.copy()
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file("assets/hit.wav").set_sample_width(2)
 METRONOME_M = AudioSegment.from_file("assets/metronome_measure.wav").set_sample_width(2)
@@ -63,7 +73,6 @@ class Editor:
         self.playing = False
         self.last_saved_hash = None
         self.playback = None
-        self.error = None
         self.time_signature = (4, 4)
         self.note_snapping = 3, 3
         self.cover_id = None
@@ -77,6 +86,22 @@ class Editor:
         self.timeline_height = 50
         self.hitsound_offset = 0
         self.metronome = False
+        self.cursor = True
+        self.colors = []
+        if os.path.exists("colors.txt"):
+            with open("colors.txt", "r") as f:
+                for line in f.read().splitlines():
+                    color = int(line[1:], base=16)
+                    if color <= 0xFFFFFF:
+                        color = color | 0xFF000000
+                    # ARGB -> ABGR
+                    r, g, b, a = (color & 0xFF), ((color >> 8) & 0xFF), ((color >> 16) & 0xFF), ((color >> 24) & 0xFF)
+                    color = a << 24 | r << 16 | g << 8 | b
+                    self.colors.append(color)
+        else:
+            with open("colors.txt", "w") as f:
+                f.write("#FFFFFFFF")
+            self.colors = [0xFFFFFFFF]
 
     def file_display(self, extensions):
         """Create a file select window."""
@@ -101,18 +126,6 @@ class Editor:
         clicked, self.file_choice = imgui.listbox("Levels", self.file_choice,
                                                   [path for path in self.files])
         return clicked
-
-    def load_image(self, im: Image.Image):
-        width, height = im.size
-        texture_data = im.tobytes()  # Get the image's raw data for GL
-        self.cover_id = self.cover_id if self.cover_id is not None else GL.glGenTextures(
-            1)  # Generate the cover id if it doesn't exist, otherwise replace the texture at said id
-        # Bind and set the texture at the id
-        GL.glBindTexture(GL.GL_TEXTURE_2D, self.cover_id)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, width, height, 0, GL.GL_RGBA,
-                        GL.GL_UNSIGNED_BYTE, texture_data)
 
     def open_file_dialog(self, extensions: list[str]):
         clicked = self.file_display(extensions)  # Display a file list
@@ -179,11 +192,22 @@ class Editor:
             if self.playing:
                 self.starting_position += self.time - old_time
 
+    def create_image(self, im, tex_id) -> int:
+        texture_data = im.tobytes()  # Get the image's raw data for GL
+        # Bind and set the texture at the id
+        GL.glBindTexture(GL.GL_TEXTURE_2D, tex_id)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, im.size[0], im.size[1], 0, GL.GL_RGBA,
+                        GL.GL_UNSIGNED_BYTE, texture_data)
+        return tex_id  # NOTE: returning it makes things easier
+
     def start(self, window, impl, font, *_):
         self.io = imgui.get_io()
 
         event = sdl2.SDL_Event()
 
+        # Initialize variables
         running = True
         old_audio = None
         audio_data = None
@@ -195,17 +219,16 @@ class Editor:
         last_hitsound_times = np.zeros((0), dtype=np.int64)
         old_mouse = (0, 0, 0, 0, 0)
         old_beat = 0
-        self.load_image(NO_COVER)
-        # Load the Github icon (this doesn't work elsewhere)
+        tex_ids = GL.glGenTextures(3)  # NOTE: Update this when you add more images
+        self.cover_id = int(tex_ids[0])
+        note_offset = None
+        cursor_positions = [[0, 0]]
+        # Load constant textures
+        with Image.open("assets/nocover.png") as im:
+            NO_COVER = im.copy()
+            COVER_ID = self.create_image(NO_COVER, int(tex_ids[0]))
         with Image.open("assets/github.png") as im:
-            texture_data = im.tobytes()  # Get the image's raw data for GL
-            GITHUB_ICON_ID = GL.glGenTextures(1)
-            # Bind and set the texture at the id
-            GL.glBindTexture(GL.GL_TEXTURE_2D, GITHUB_ICON_ID)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 32, 32, 0, GL.GL_RGBA,
-                            GL.GL_UNSIGNED_BYTE, texture_data)
+            GITHUB_ICON_ID = self.create_image(im, int(tex_ids[1]))
         while running:
             self.rects_drawn = 0
             dt = time.perf_counter_ns()
@@ -233,7 +256,7 @@ class Editor:
                     self.playback = play_at_position(self.level.audio + self.volume, self.time / 1000)
             elif not self.playing and was_playing:
                 if self.playback is not None:
-                    del self.starting_time  # Deleting these variables when they're not needed makes it easier to figure out that
+                    del self.starting_time  # NOTE: Deleting these variables when they're not needed makes it easier to figure out that
                     del self.starting_position  # these are being accessed when they shouldn't be.
                     self.playback.stop()
                     self.playback = None
@@ -322,7 +345,7 @@ class Editor:
                                     self.filename is not None and self.last_saved_hash is None):
                                 running = False
                             else:
-                                menu_choice = "quit.ensure"  # The quit menu won't open if I don't do this from here
+                                menu_choice = "quit.ensure"  # NOTE: The quit menu won't open if I don't do this from here
                         imgui.end_menu()
                     if imgui.begin_menu("Edit", self.level is not None):
                         imgui.push_item_width(240)
@@ -359,7 +382,7 @@ class Editor:
                             imgui.set_tooltip("Click to set a cover.")
                         clicked = imgui.button("Remove Cover")
                         if clicked:
-                            self.load_image(NO_COVER)  # Remove the cover
+                            self.create_image(NO_COVER, COVER_ID)  # Remove the cover
                         imgui.separator()
                         if self.level.audio is None:
                             imgui.text("/!\\ Map has no audio")
@@ -368,7 +391,7 @@ class Editor:
                             menu_choice = "edit.song"
                         imgui.pop_item_width()
                         imgui.end_menu()
-                    if imgui.begin_menu("Preferences and Tools", self.level is not None):
+                    if imgui.begin_menu("Preferences", self.level is not None):
                         imgui.push_item_width(120)
                         changed, value = imgui.checkbox("Vsync?", self.vsync)
                         if changed:
@@ -400,15 +423,12 @@ class Editor:
                             imgui.set_tooltip("Set to 0 to turn off beat snapping.")
                         if self.bpm != 0:
                             imgui.indent()
+                            changed, value = imgui.input_int("Offset (ms)", self.offset, 0)
+                            if changed:
+                                self.offset = value
                             changed, value = imgui.checkbox("BPM markers?", self.bpm_markers)
                             if changed:
                                 self.bpm_markers = value
-                            if self.bpm_markers:
-                                imgui.indent()
-                                changed, value = imgui.input_int("Marker Offset (ms)", self.offset, 0)
-                                if changed:
-                                    self.offset = value
-                                imgui.unindent()
                             changed, value = imgui.checkbox("Metronome?", self.metronome)
                             if changed:
                                 self.metronome = value
@@ -472,46 +492,50 @@ class Editor:
                             if changed:
                                 self.hitsound_offset = value
                             imgui.unindent()
+                        changed, value = imgui.checkbox("Show cursor?", self.cursor)
+                        if changed:
+                            self.cursor = value
                         imgui.pop_item_width()
+                        imgui.end_menu()
+                    if imgui.begin_menu("Tools", self.level is not None):
+                        clicked = imgui.button("Offset Notes")
+                        if clicked:
+                            menu_choice = "tools.offset_notes"
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
                         webbrowser.open("https://github.com/balt-is-you-and-shift/SSpy", 2, autoraise=True)
                         source_code_was_open = False
                     imgui.end_main_menu_bar()
-                if menu_choice == "file.open":
-                    imgui.open_popup("file.open")
-                    self.file_choice = 0
+                # Handle popups
+                if menu_choice is not None:
+                    imgui.open_popup(menu_choice)
+                    if menu_choice == "file.open":
+                        self.file_choice = 0
                 if imgui.begin_popup("file.open"):
                     # Open a file dialog
                     changed, value = self.open_file_dialog([".sspm"])
                     if changed:
                         self.filename = value
-                        try:
-                            with open(value, "rb") as file:
-                                # Read the level from the file and load it
-                                self.level = Level.from_sspm(file)
-                            # Initialize song variables
-                            self.load_image(self.level.cover if self.level.cover is not None else NO_COVER)
-                            self.time = 0
-                            self.playing = False
-                        except Exception as e:
-                            self.error = e
+                        with open(value, "rb") as file:
+                            # Read the level from the file and load it
+                            self.level = Level.from_sspm(file)
+                        # Initialize song variables
+                        self.create_image(NO_COVER if self.level.cover is None else self.level.cover, COVER_ID)
+                        self.time = 0
+                        self.playing = False
                     imgui.end_popup()
-                if menu_choice == "file.saveas":
-                    imgui.open_popup("file.saveas")
                 if imgui.begin_popup("file.saveas"):
                     changed, value = self.save_file_dialog()
                     if changed:
-                        with open(value, "wb+") as file:
-                            file.write(self.level.save())
-                        self.last_saved_hash = hash(self.level)
+                        if imgui.begin("Saving..."):
+                            with open(value, "wb+") as file:
+                                file.write(self.level.save())
+                            self.last_saved_hash = hash(self.level)
+                            imgui.end()
                         imgui.close_current_popup()
                     imgui.end_popup()
-                if menu_choice == "edit.cover":
-                    imgui.open_popup("edit.cover")
-                if imgui.begin_popup(
-                        "edit.cover"):
+                if imgui.begin_popup("edit.cover"):
                     # Load the selected image
                     changed, value = self.open_file_dialog([".png"])
                     if changed:
@@ -519,10 +543,7 @@ class Editor:
                             self.level.cover = im.copy()
                             self.load_image(self.level.cover)
                     imgui.end_popup()
-                if menu_choice == "edit.song":
-                    imgui.open_popup("edit.song")
-                if imgui.begin_popup(
-                        "edit.song"):
+                if imgui.begin_popup("edit.song"):
                     # Load the selected audio
                     changed, value = self.open_file_dialog([".mp3", ".ogg", ".wav", ".flac", ".opus"])
                     if changed:
@@ -536,11 +557,7 @@ class Editor:
                             audio_buf.seek(0)
                             self.level.audio = AudioSegment.from_file(audio_buf)
                     imgui.end_popup()
-                if menu_choice == "quit.ensure":
-                    imgui.open_popup("quit.ensure")
-                if imgui.begin_popup(
-                        "quit.ensure"
-                ):
+                if imgui.begin_popup("quit.ensure"):
                     imgui.text("You have unsaved changes!")
                     imgui.text("Are you sure you want to exit?")
                     if imgui.button("Quit"):
@@ -549,6 +566,27 @@ class Editor:
                     if imgui.button("Cancel"):
                         imgui.close_current_popup()
                     imgui.end_popup()
+                if imgui.begin_popup("tools.offset_notes"):
+                    imgui.text("Offset all notes by a specified value.")
+                    if note_offset is None:
+                        note_offset = 0
+                    changed, value = imgui.input_int("Offset", note_offset, 0)
+                    if changed:
+                        note_offset = value
+                    if imgui.button("Cancel"):
+                        imgui.close_current_popup()
+                    imgui.same_line(spacing=10)
+                    if imgui.button("Confirm"):
+                        imgui.text("Working...")
+                        # FIXME: this code kinda sucks
+                        new_notes = {}
+                        for timing, pos in self.level.notes.items():
+                            new_notes[timing + note_offset] = pos
+                        self.level.notes = new_notes
+                        note_offset = None
+                        imgui.close_current_popup()
+                    imgui.end_popup()
+
                 if self.level is not None:
                     size = self.io.display_size
                     imgui.set_next_window_size(size[0], size[1] - 26)
@@ -571,7 +609,7 @@ class Editor:
                             draw_list.add_rect_filled(x, (y + h) - self.timeline_height, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
 
-                            times_to_display = np.array(tuple(self.level.notes.keys()), dtype=np.uint32)
+                            times_to_display = self.level.get_notes()
                             if (self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
@@ -593,11 +631,13 @@ class Editor:
                                         break
                             if self.draw_notes:
                                 # Draw notes
-                                for note in times_to_display:
+                                for i, note in enumerate(times_to_display):
+                                    color = (self.colors[i % len(self.colors)] & 0xFFFFFF) | 0x40000000
                                     progress = note / timeline_width
                                     progress = progress if not math.isnan(progress) else 1
                                     draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
-                                                              x + int(w * progress) + 1, (y + h), 0x40ffffff)
+                                                              x + int(w * progress) + 1, (y + h),
+                                                              color)
                                     self.rects_drawn += 1
                             # Draw currently visible area on timeline
                             start = (self.time) / timeline_width
@@ -619,7 +659,7 @@ class Editor:
                             if self.bpm:
                                 # Draw the current measure and beat
                                 ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
-                                current_beat = (self.time - self.offset) / (ms_per_beat)
+                                current_beat = (self.time + self.offset) / (ms_per_beat)
                                 m_text = f"Measure {current_beat // self.time_signature[0]:.0f}"
                                 draw_list.add_text(
                                     center_of_view(m_text),
@@ -639,51 +679,67 @@ class Editor:
                                             _play_with_simpleaudio(METRONOME_B)
                                 old_beat = current_beat
 
-                                # Draw beat markers in note space
                                 if self.bpm_markers:
-                                    closest_beat = (((self.time) // (ms_per_beat)) * (ms_per_beat)) - ((- self.offset) % ms_per_beat)
-                                    for n in np.arange(closest_beat, (closest_beat + self.approach_rate), ms_per_beat):
-                                        i = (self.time - self.offset) / ms_per_beat  # Current beat
-                                        line_prog = (i + 1) % 1
-                                        i = math.ceil(i)
-                                        position = (adjusted_x + adjusted_x + square_side) // 2, (
-                                            y + y + square_side) // 2
+                                    # Draw beat markers in note space
+                                    position = (adjusted_x + adjusted_x + square_side) // 2, (
+                                        y + y + square_side) // 2
+                                    # NOTE: there used to be something here to brighten the marker when it was on a new measure. this was scrapped due to being way too much of a bug nest
+                                    offset_time = self.time + self.offset
+                                    ending_beat = ((self.approach_rate) / ms_per_beat)
+                                    for index in range(int(ending_beat)):
+                                        decimal_beat = (index + ((offset_time % ms_per_beat) / ms_per_beat))
+                                        line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
                                         draw_list.add_rect(
                                             self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
                                             self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
-                                            (0xff000000 if i % self.time_signature[0] == 0 else
-                                                0x80000000) | int(0xFF * line_prog),
-                                            thickness=int((4 if i % self.time_signature[0] == 0 else 2) * line_prog))
+                                            0x80000000 | int(0xFF * line_prog),
+                                            thickness=2 * line_prog
+                                        )
                                         self.rects_drawn += 1
 
-                            # HACK: Copy the times display for hitsound offsets
-                            hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time - self.hitsound_offset - 1,
-                                                                             (times_to_display) < (
-                                                                                 self.time + self.approach_rate - self.hitsound_offset))].flatten()
+                                    # Draw beat markers on timeline
+                                    for beat in range(math.ceil(timeline_width / ms_per_beat)):
+                                        on_measure = beat % self.time_signature[0] == 0
+                                        beat_time = (beat * ms_per_beat) + self.offset
+                                        progress = beat_time / timeline_width
+                                        progress = progress if not math.isnan(progress) else 1
+                                        draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
+                                                                  x + int(w * progress) + 1, (y + h),
+                                                                  0xff0000ff if on_measure else 0x800000ff)
+                                        self.rects_drawn += 1
 
-                            # Draw notes on note space
+                            # FIXME: Copy the times display for hitsound offsets
+                            hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time + self.hitsound_offset - 1,
+                                                                             (times_to_display) < (
+                                                                                 self.time + self.approach_rate + self.hitsound_offset))].flatten()
+
                             note_times = times_to_display[np.logical_and(times_to_display >= self.time - 1,
                                                                          (times_to_display) < (
                                                                              self.time + self.approach_rate))].flatten()
                             for note_time in note_times[::-1]:
+                                i = np.where(times_to_display == note_time)[0][0]
                                 for note in self.level.notes[note_time]:
+                                    rgba = self.colors[i % len(self.colors)]
+                                    rgb, a = rgba & 0xFFFFFF, (rgba & 0xFF000000) >> 24
                                     progress = 1 - ((note_time - self.time) / self.approach_rate)
                                     self.draw_note(draw_list, note,
-                                                   (adjusted_x, y, adjusted_x + square_side, y + square_side), progress)
+                                                   (adjusted_x, y, adjusted_x + square_side, y + square_side), progress,
+                                                   color=rgb, alpha=a)
                                     self.rects_drawn += 1
 
                             # Play note hit sound
-                            if self.playing:
+                            if self.playing and self.hitsounds:
                                 if ((last_hitsound_times.size and
-                                        np.min(last_hitsound_times) < self.time - self.hitsound_offset - 1)):
+                                        np.min(last_hitsound_times) < self.time + self.hitsound_offset - 1)):
                                     _play_with_simpleaudio(HITSOUND)
                             last_hitsound_times = hitsound_times
 
                             level_was_hovered = imgui.is_window_hovered()
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
                                     (y <= mouse_pos[1] < y + square_side)) and level_was_hovered:
+                                # Note placing and deleting
                                 note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * 3) - 0.5,
                                             (((mouse_pos[1] - (y)) / (square_side)) * 3) - 0.5)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
@@ -722,6 +778,34 @@ class Editor:
                                             self.level.notes[int(self.time)].append(note_pos)
                                         else:
                                             self.level.notes[int(self.time)] = [note_pos]
+
+                            # Draw cursor
+                            if self.cursor and len(self.level.notes) > 0:
+                                notes = self.level.get_notes()
+                                start = np.max(notes[notes - max(int(self.time), np.min(notes)) <= 0])
+                                try:
+                                    end = np.min(notes[notes - int(self.time) > 0])
+                                except ValueError:
+                                    end = start
+                                if (end - start):
+                                    progress = (self.time - start) / (end - start)
+                                    start_pos = np.array(self.level.notes[start]).reshape(-1, 2).mean(0)
+                                    end_pos = np.array(self.level.notes[end]).reshape(-1, 2).mean(0)
+                                    # FIXME: this is copied from draw_note and kinda sucks ass
+                                    box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
+                                    center = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                                    spacing = ((box[2] - box[0]) / 3)
+                                    def position(pos): return [center[0] + ((pos[0] - 1) * spacing), center[1] + ((pos[1] - 1) * spacing)]
+
+                                    def ease_out_cubic(a, b, t):
+                                        return (a * (((1 - t) ** 3))) + (b * (1 - ((1 - t) ** 3)))
+                                    cursor_positions = [position((ease_out_cubic(start_pos[0], end_pos[0], progress), ease_out_cubic(start_pos[1], end_pos[1], progress)))] + cursor_positions[:5]
+                                    draw_list.add_circle_filled(*cursor_positions[0], spacing / 20, 0xFFFFFFFF, num_segments=32)
+                                else:
+                                    cursor_positions = cursor_positions[:5]
+                                if len(cursor_positions) > 1:
+                                    draw_list.add_polyline(cursor_positions[1:], 0x40FFFFFF, thickness=spacing / 20)
+
                             # Draw current statistics
                             fps_text = f"{int(self.io.framerate)}{f'/{self.fps_cap}' if not self.vsync else ''} FPS"
                             fps_size = imgui.calc_text_size(fps_text)
@@ -742,15 +826,6 @@ class Editor:
                             self.timeline_height = max(5, (y + h) - mouse_pos[1])
 
             old_mouse = mouse
-            if self.error is not None:
-                imgui.open_popup(self.error.__class__.__name__)
-            if imgui.begin_popup(self.error.__class__.__name__):
-                imgui.text_ansi("\n".join(traceback.format_exception(self.error)))
-                clicked = imgui.button("Close")
-                if clicked:
-                    imgui.close_current_popup()
-                    self.error = None
-                imgui.end_popup()
             GL.glClearColor(0., 0., 0., 1)
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
             imgui.render()
