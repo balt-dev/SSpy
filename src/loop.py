@@ -266,7 +266,7 @@ class Editor:
                     # Snap the current time to the nearest quarter of a beat, for easier scrolling through
                     ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
                     step = (ms_per_beat) / 4
-                    self.time = (self.time // step) * (step) + self.offset
+                    self.time = ((self.time // step) * (step)) + self.offset
             was_playing = self.playing
             # Set the window name
             if self.level is None:  # Is a level open?
@@ -620,6 +620,7 @@ class Editor:
                                 waveform_width = int(
                                     size[0])
                                 # Draw waveform
+                                # FIXME: it'd be nice if this wasn't a python loop
                                 for n in range(0, waveform_width, self.waveform_res):
                                     try:
                                         # Slice a segment of audio
@@ -661,7 +662,7 @@ class Editor:
                             if self.bpm:
                                 # Draw the current measure and beat
                                 ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
-                                current_beat = (self.time + self.offset) / (ms_per_beat)
+                                current_beat = (self.time - self.offset) / (ms_per_beat)
                                 m_text = f"Measure {current_beat // self.time_signature[0]:.0f}"
                                 draw_list.add_text(
                                     center_of_view(m_text),
@@ -687,10 +688,14 @@ class Editor:
                                         y + y + square_side) // 2
                                     # NOTE: there used to be something here to brighten the marker when it was on a new measure. this was scrapped due to being way too much of a bug nest
                                     offset_time = self.time + self.offset
-                                    ending_beat = ((self.approach_rate) / ms_per_beat)
-                                    for index in range(int(ending_beat)):
+                                    line_prog = 0
+                                    index = 0
+                                    while line_prog < 1:  # NOTE: This used to be a for loop, but it wasn't going far enough. I decided to just keep going until it hit the camera.
                                         decimal_beat = (index + ((offset_time % ms_per_beat) / ms_per_beat))
                                         line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
+                                        if line_prog > 1:
+                                            break
+                                        print(line_prog, index)
                                         draw_list.add_rect(
                                             self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
                                             self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
@@ -700,6 +705,7 @@ class Editor:
                                             thickness=2 * line_prog
                                         )
                                         self.rects_drawn += 1
+                                        index += 1
 
                                     # Draw beat markers on timeline
                                     for beat in range(math.ceil(timeline_width / ms_per_beat)):
