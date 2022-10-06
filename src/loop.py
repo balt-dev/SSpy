@@ -193,9 +193,11 @@ class Editor:
                 self.starting_position += self.time - old_time
 
     def create_image(self, im, tex_id) -> int:
-        texture_data = im.tobytes()  # Get the image's raw data for GL
+        texture_data = im.convert("RGBA").tobytes()  # Get the image's raw data for GL
         # Bind and set the texture at the id
         GL.glBindTexture(GL.GL_TEXTURE_2D, tex_id)
+        GL.glClearColor(0, 0, 0, 0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, im.size[0], im.size[1], 0, GL.GL_RGBA,
@@ -375,7 +377,7 @@ class Editor:
                             self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
                                                                                                                 "_")
                         imgui.separator()
-                        clicked = imgui.image_button(self.cover_id, 150, 150, frame_padding=0)
+                        clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
                         if clicked:
                             menu_choice = "edit.cover"
                         if imgui.is_item_hovered():
@@ -521,7 +523,7 @@ class Editor:
                             # Read the level from the file and load it
                             self.level = Level.from_sspm(file)
                         # Initialize song variables
-                        self.create_image(NO_COVER if self.level.cover is None else self.level.cover, COVER_ID)
+                        self.create_image(NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), COVER_ID)
                         self.time = 0
                         self.playing = False
                     imgui.end_popup()
@@ -537,11 +539,11 @@ class Editor:
                     imgui.end_popup()
                 if imgui.begin_popup("edit.cover"):
                     # Load the selected image
-                    changed, value = self.open_file_dialog([".png"])
+                    changed, value = self.open_file_dialog([".png", ".jpg", ".bmp", ".gif"])
                     if changed:
                         with Image.open(value) as im:
-                            self.level.cover = im.copy()
-                            self.load_image(self.level.cover)
+                            self.level.cover = im.copy().resize((200, 200), Image.Resampling.BILINEAR)
+                            self.create_image(self.level.cover, COVER_ID)
                     imgui.end_popup()
                 if imgui.begin_popup("edit.song"):
                     # Load the selected audio
