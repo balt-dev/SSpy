@@ -6,6 +6,8 @@ from PIL import Image
 from pydub import AudioSegment
 import struct
 
+import math
+
 
 def read_line(file):
     out = bytearray(b"")
@@ -70,7 +72,7 @@ class Level:
             data_length = int.from_bytes(file.read(8), "little")
             audio_data = file.read(data_length)
             with BytesIO(audio_data) as io:
-                audio = AudioSegment.from_file(io)
+                audio = AudioSegment.from_file(io).set_sample_width(2)  # HACK: if i don't do this, it plays horribly clipped and way too loud. it's a simpleaudio bug :/
         notes = {}
         for _ in range(note_count):
             timing = int.from_bytes(file.read(4), "little")
@@ -87,6 +89,7 @@ class Level:
 
     def save(self):
         with BytesIO() as output:
+            print("Writing metadata...")
             output.write(b"SS+m\x01\x00\x00\x00")
             output.write(bytes(self.id + "\n", "utf-8"))
             output.write(bytes(self.name + "\n", "utf-8"))
@@ -103,6 +106,7 @@ class Level:
             if self.cover is None:
                 output.write(b"\x00")
             else:
+                print(f"Writing cover...")
                 output.write(b"\x02")
                 with BytesIO() as im_data:
                     self.cover.save(im_data, format="PNG")
@@ -113,6 +117,7 @@ class Level:
             if self.audio is None:
                 output.write(b"\x00")
             else:
+                print(f"Writing song...")
                 output.write(b"\x01")
                 with BytesIO() as audio_data:
                     self.audio.export(audio_data, format="ogg")
@@ -120,7 +125,8 @@ class Level:
                         audio_data.seek(0, 2).to_bytes(8, "little")
                     )
                     output.write(audio_data.getvalue())
-            for timing, notes in self.notes.items():
+            for i, (timing, notes) in enumerate(self.notes.items()):
+                print(f"\rWriting notes... ({i+1: >{(len(str(len(self.notes))))}}/{len(self.notes)})", end="")
                 for position in notes:
                     output.write(
                         timing.to_bytes(4, "little")
@@ -132,4 +138,5 @@ class Level:
                     else:
                         output.write(b"\x01")
                         output.write(struct.pack("<ff", *position))
+            print()
             return output.getvalue()

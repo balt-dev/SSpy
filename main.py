@@ -21,7 +21,6 @@ def main():
     try:
         editor.start(window, impl, font, gl_ctx)
     except Exception:  # Don't catch KeyboardInterrupt
-        exc = traceback.format_exc()
         print("-------------------")
         print("If you're seeing this, the app encountered a fatal error and had to close.")
         print("Please send this traceback to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
