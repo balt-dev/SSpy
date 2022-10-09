@@ -1,5 +1,6 @@
 from functools import lru_cache
 from io import BytesIO
+from itertools import chain
 
 import numpy as np
 from PIL import Image
@@ -98,7 +99,7 @@ class Level:
                 (max(self.notes.keys()) if len(self.notes) else 0).to_bytes(4, "little")
             )
             output.write(
-                len(self.notes).to_bytes(4, "little")
+                len(tuple(chain(*self.notes.values()))).to_bytes(4, "little")
             )
             output.write(
                 (self.difficulty + 1).to_bytes(1, "little")
@@ -120,6 +121,7 @@ class Level:
                 print(f"Writing song...")
                 output.write(b"\x01")
                 with BytesIO() as audio_data:
+                    # XXX: this leads to compression rot over multiple saves, after 50 saves or so the music isn't really listenable anymore
                     self.audio.export(audio_data, format="ogg")
                     output.write(
                         audio_data.seek(0, 2).to_bytes(8, "little")

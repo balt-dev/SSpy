@@ -115,7 +115,7 @@ class Editor:
                 f.write("#FFFFFFFF")
             self.colors = [0xFFFFFFFF]
         self.swing = 0.5
-        self.hitsound_panning = 0
+        self.hitsound_panning = 1.0
 
     def file_display(self, extensions):
         """Create a file select window."""
@@ -502,7 +502,7 @@ class Editor:
                             if changed:
                                 self.time = value
                         if self.level.audio is not None:
-                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 0.001, "%.1f")
+                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 10, "%.1f", 1.2)
                             if changed:
                                 self.volume = value
                                 # Change the volume of the song if it's playing
@@ -520,6 +520,9 @@ class Editor:
                             changed, value = imgui.slider_float("Hitsound panning", self.hitsound_panning, -1, 1, "%.2f")
                             if changed:
                                 self.hitsound_panning = value
+                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 10, "%.1f", 1.2)
+                            if changed:
+                                self.volume = value
                             imgui.unindent()
                         changed, value = imgui.checkbox("Show cursor?", self.cursor)
                         if changed:
@@ -721,8 +724,8 @@ class Editor:
                                     while line_prog < 1:  # NOTE: This used to be a for loop, but it wasn't going far enough. I decided to just keep going until it hit the camera.
                                         representing_beat = floor_beat - (index) + math.ceil(self.approach_rate / ms_per_beat)  # What beat this marker represents (NOTE: took me a week to figure out how to find this ._.)
                                         decimal_beat = ((index) + ((offset_time % ms_per_beat) / ms_per_beat))
-                                        decimal_beat += adjust_swing(representing_beat, self.swing) - representing_beat
-                                        # BUG: line progress is offset somewhat on bpm != 120 depending on ar
+                                        if self.swing != 0.5:
+                                            decimal_beat += adjust_swing(representing_beat, self.swing) - representing_beat
                                         line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
                                         if line_prog > 1:
                                             break
