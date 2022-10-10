@@ -127,7 +127,7 @@ class Level:
                         audio_data.seek(0, 2).to_bytes(8, "little")
                     )
                     output.write(audio_data.getvalue())
-            for i, (timing, notes) in enumerate(self.notes.items()):
+            for i, (timing, notes) in enumerate(dict(sorted(self.notes.items())).items()):
                 print(f"\rWriting notes... ({i+1: >{(len(str(len(self.notes))))}}/{len(self.notes)})", end="")
                 for position in notes:
                     output.write(

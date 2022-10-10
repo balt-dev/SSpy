@@ -23,6 +23,7 @@ from pathlib import Path
 from PIL import Image
 from pydub import AudioSegment
 from pydub.playback import _play_with_simpleaudio
+from pydub.exceptions import TooManyMissingFrames
 
 from src.level import Level
 
@@ -45,8 +46,20 @@ METRONOME_M = AudioSegment.from_file("assets/metronome_measure.wav").set_sample_
 METRONOME_B = AudioSegment.from_file("assets/metronome_beat.wav").set_sample_width(2)
 
 
+def speed_change(sound, speed=1.0):
+    if speed < 0:
+        sound = sound.reverse()
+    sound_with_altered_frame_rate = sound._spawn(sound.raw_data, overrides={
+        "frame_rate": int(sound.frame_rate * abs(speed))
+    })
+    return sound_with_altered_frame_rate.set_frame_rate(sound.frame_rate)
+
+
 def play_at_position(audio, position):
-    cut_audio = audio[int(position * 1000):]
+    try:
+        cut_audio = audio[int(position * 1000):]
+    except TooManyMissingFrames:
+        return None
     return _play_with_simpleaudio(cut_audio)
 
 
@@ -116,10 +129,11 @@ class Editor:
             self.colors = [0xFFFFFFFF]
         self.swing = 0.5
         self.hitsound_panning = 1.0
+        self.vis_map_size = 3
+        self.audio_speed = 1
 
     def file_display(self, extensions):
         """Create a file select window."""
-        changed = False
         folder_changed, self.current_folder = imgui.input_text("Directory", self.current_folder, 65536)
         if folder_changed or not self.files:
             # If the directory isn't what it was last time, go to the new directory
@@ -173,7 +187,7 @@ class Editor:
         # Return the filepath if the save button has been clicked, return a fail case otherwise
         if imgui.button("Save"):
             self.filename = self.temp_filename
-            self.temp_filename = None
+            self.temp_filename = "out.sspm"
             return True, os.path.join(self.current_folder, self.filename)
         return False, None
 
@@ -202,7 +216,7 @@ class Editor:
             # Set the playback and position
             if self.playback is not None:
                 self.playback.stop()
-                self.playback = play_at_position(self.level.audio + self.volume, self.time / 1000)
+                self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), (self.time) / 1000)
             if self.playing:
                 self.starting_position += self.time - old_time
 
@@ -268,7 +282,7 @@ class Editor:
                 space_last = False
             if self.playing and not was_playing:
                 if self.level.audio is not None:
-                    self.playback = play_at_position(self.level.audio + self.volume, self.time / 1000)
+                    self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
                 self.starting_time = time.perf_counter_ns()
                 self.starting_position = self.time
             elif not self.playing and was_playing:
@@ -283,6 +297,13 @@ class Editor:
                     ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
                     step = (ms_per_beat) / 4
                     self.time = ((self.time // step) * (step)) + self.offset
+            # Fix playback not working when playing in reverse (speed < 0)
+            # This keeps going until it's being played
+            if (self.playing
+                and self.playback is None
+                and self.level.audio is not None
+                    and self.time / 1000 <= self.level.audio.duration_seconds):
+                self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
             # Set the window name
             if self.level is None:  # Is a level open?
                 sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
@@ -508,7 +529,11 @@ class Editor:
                                 # Change the volume of the song if it's playing
                                 if self.playback is not None:
                                     self.playback.stop()
-                                    self.playback = play_at_position(self.level.audio + value, self.time / 1000)
+                                    self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), (self.time) / 1000)
+                        if not self.playing:  # NOTE: If I don't stop it from being changed while playing, wacky shit happens and self.time gets set to NaN somehow. No thanks.
+                            changed, value = imgui.input_float("Playback Speed", self.audio_speed, 0, format="%.2f")
+                            if changed:
+                                self.audio_speed = value if value != 0 else 1
                         changed, value = imgui.checkbox("Play hitsounds?", self.hitsounds)
                         if changed:
                             self.hitsounds = value
@@ -520,13 +545,14 @@ class Editor:
                             changed, value = imgui.slider_float("Hitsound panning", self.hitsound_panning, -1, 1, "%.2f")
                             if changed:
                                 self.hitsound_panning = value
-                            changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 10, "%.1f", 1.2)
-                            if changed:
-                                self.volume = value
                             imgui.unindent()
+                        imgui.separator()
                         changed, value = imgui.checkbox("Show cursor?", self.cursor)
                         if changed:
                             self.cursor = value
+                        changed, value = imgui.input_int("Map Size", self.vis_map_size, 0)
+                        if changed:
+                            self.vis_map_size = value
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Tools", self.level is not None):
@@ -721,27 +747,28 @@ class Editor:
                                     offset_time = self.time + self.offset
                                     line_prog = 0
                                     index = -1
-                                    while line_prog < 1:  # NOTE: This used to be a for loop, but it wasn't going far enough. I decided to just keep going until it hit the camera.
-                                        representing_beat = floor_beat - (index) + math.ceil(self.approach_rate / ms_per_beat)  # What beat this marker represents (NOTE: took me a week to figure out how to find this ._.)
-                                        decimal_beat = ((index) + ((offset_time % ms_per_beat) / ms_per_beat))
-                                        if self.swing != 0.5:
-                                            decimal_beat += adjust_swing(representing_beat, self.swing) - representing_beat
-                                        line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
-                                        if line_prog > 1:
-                                            break
-                                        draw_list.add_rect(
-                                            self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
-                                            self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
-                                            self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
-                                            self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
-                                            0xFF000000 | int(0xFF * max(0, line_prog) / (2 if representing_beat % self.time_signature[0] else 1)),
-                                            thickness=2 * max(0, line_prog) * (2 if not representing_beat % self.time_signature[0] else 1)
-                                        )
-                                        self.rects_drawn += 1
-                                        index += 1
+                                    if self.bpm > 0:
+                                        while line_prog < 1:  # NOTE: This used to be a for loop, but it wasn't going far enough. I decided to just keep going until it hit the camera.
+                                            representing_beat = floor_beat - (index) + math.ceil(self.approach_rate / ms_per_beat)  # What beat this marker represents (NOTE: took me a week to figure out how to find this ._.)
+                                            decimal_beat = ((index) + ((offset_time % ms_per_beat) / ms_per_beat))
+                                            if self.swing != 0.5:
+                                                decimal_beat += adjust_swing(representing_beat, self.swing) - representing_beat
+                                            line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
+                                            if line_prog > 1:
+                                                break
+                                            draw_list.add_rect(
+                                                self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
+                                                self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
+                                                self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
+                                                self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
+                                                0xFF000000 | int(0xFF * max(0, line_prog) / (2 if representing_beat % self.time_signature[0] else 1)),
+                                                thickness=2 * max(0, line_prog) * (2 if not representing_beat % self.time_signature[0] else 1)
+                                            )
+                                            self.rects_drawn += 1
+                                            index += 1
 
                                     # Draw beat markers on timeline
-                                    for beat in range(math.ceil(timeline_width / ms_per_beat)):
+                                    for beat in range(min(math.ceil(timeline_width / ms_per_beat), 10000)):
                                         on_measure = beat % self.time_signature[0] == 0
                                         beat = adjust_swing(beat, 1 - self.swing)
                                         beat_time = (beat * ms_per_beat) + self.offset
@@ -776,7 +803,7 @@ class Editor:
                                 if ((last_hitsound_times.size and
                                         np.min(last_hitsound_times) < self.time + self.hitsound_offset - 1)):
                                     notes = self.level.notes[np.min(last_hitsound_times)]
-                                    for note in notes:
+                                    for note in notes[:8]:
                                         pos = note[0] - 1
                                         panning = pos * self.hitsound_panning
                                         _play_with_simpleaudio(HITSOUND.pan(min(max(panning, -1), 1)))
@@ -786,8 +813,8 @@ class Editor:
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
                                     (y <= mouse_pos[1] < y + square_side)) and level_was_hovered:
                                 # Note placing and deleting
-                                note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * 3) - 0.5,
-                                            (((mouse_pos[1] - (y)) / (square_side)) * 3) - 0.5)
+                                note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1,
+                                            (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
                                 time_arr = time_arr[
                                     np.logical_and(time_arr - self.time >= -1, time_arr - self.time < 10)]
@@ -824,7 +851,6 @@ class Editor:
                                             self.level.notes[int(self.time)].append(note_pos)
                                         else:
                                             self.level.notes[int(self.time)] = [note_pos]
-
                             # Draw cursor
                             if self.cursor and len(self.level.notes) > 0:
                                 notes = self.level.get_notes()
@@ -840,11 +866,17 @@ class Editor:
                                     # FIXME: this is copied from draw_note and kinda sucks ass
                                     box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
                                     center = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
-                                    spacing = ((box[2] - box[0]) / 3)
+                                    spacing = ((box[2] - box[0]) / self.vis_map_size)
                                     def position(pos): return [center[0] + ((pos[0] - 1) * spacing), center[1] + ((pos[1] - 1) * spacing)]
 
                                     def ease_out_cubic(a, b, t):
                                         return (a * (((1 - t) ** 3))) + (b * (1 - ((1 - t) ** 3)))
+
+                                    def ease_in_cubic(a, b, t):
+                                        return ease_out_cubic(b, a, 1 - t)
+
+                                    def ease(a, b, t):
+                                        return ease_out_cubic(a, b, t) if self.audio_speed > 0 else ease_in_cubic(a, b, t)
                                     cursor_positions = [position((ease_out_cubic(start_pos[0], end_pos[0], progress), ease_out_cubic(start_pos[1], end_pos[1], progress)))] + cursor_positions[:5]
                                     draw_list.add_circle_filled(*cursor_positions[0], spacing / 20, 0xFFFFFFFF, num_segments=32)
                                 else:
@@ -879,7 +911,7 @@ class Editor:
             impl.render(imgui.get_draw_data())
             sdl2.SDL_GL_SwapWindow(window)
             if self.playing:
-                self.time = ((time.perf_counter_ns() - self.starting_time) / 1000000) + self.starting_position
+                self.time = max(((time.perf_counter_ns() - self.starting_time) / (1000000 / self.audio_speed)) + self.starting_position, 0)
             was_playing = self.playing
 
             if not self.vsync:
@@ -892,7 +924,7 @@ class Editor:
 
     def draw_note(self, draw_list, note_pos, box, progress, color=0xFFFFFF, alpha=0xff):
         center = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
-        spacing = ((box[2] - box[0]) / 3)
+        spacing = ((box[2] - box[0]) / self.vis_map_size)
         note_size = spacing / 1.25
         position = (center[0] + ((note_pos[0] - 1) * spacing), center[1] + ((note_pos[1] - 1) * spacing))
         v = 1 / (1 + ((1 - progress) * self.approach_distance))
