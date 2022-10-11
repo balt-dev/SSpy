@@ -12,6 +12,7 @@
 - [x] Audio playing
   - [x] BPM markers
 - [x] Waveform on timeline
+- [ ] Move to GLFW
 - [ ] .txt map save/load support
 - [ ] Optimizations for low-end devices
 - [ ] Vulnus .zip support
