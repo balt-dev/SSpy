@@ -23,6 +23,14 @@
 
 To put it bluntly: I don't like Vulnus. 
 
+> What platforms does this run on?
+
+Almost any platform that supports OpenGL and Python. Windows, MacOS, and most Linux distributions should work.
+
+> What do I do if it crashes?
+
+Report it! My discord tag is in the crash message, but if you can't reach me from there, feel free to open an issue.
+
 > How do I run it?
 
 Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
