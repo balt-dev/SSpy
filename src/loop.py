@@ -25,7 +25,7 @@ from pydub import AudioSegment
 from pydub.playback import _play_with_simpleaudio
 from pydub.exceptions import TooManyMissingFrames
 
-from src.level import Level
+from src.level import SSPMLevel, RawDataLevel
 
 """
 In case you aren't aware:
@@ -40,10 +40,14 @@ Here's a list of the ones supported by VSCode:
 """
 # Initialize constants
 
+FORMATS: tuple = (SSPMLevel, RawDataLevel)
+FORMAT_NAMES: tuple = ("SS+ Map", "Raw Data")
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file("assets/hit.wav").set_sample_width(2)
 METRONOME_M = AudioSegment.from_file("assets/metronome_measure.wav").set_sample_width(2)
 METRONOME_B = AudioSegment.from_file("assets/metronome_beat.wav").set_sample_width(2)
+NO_COVER = None
+COVER_ID = None
 
 
 def speed_change(sound, speed=1.0):
@@ -88,7 +92,7 @@ class Editor:
         self.snapping = None
         self.level_window_size = (200, 200)
         self.filename = None
-        self.temp_filename = "out.sspm"
+        self.temp_filename = ""
         self.files = None
         self.file_choice = -1
         self.current_folder = str(Path.resolve(Path(__file__).parent))
@@ -132,6 +136,43 @@ class Editor:
         self.vis_map_size = 3
         self.audio_speed = 1
 
+    def display_sspm(self):
+        """Display the edit menu for SSPM levels."""
+        # Difficulty picker
+        changed, value = imgui.combo("Difficulty", self.level.difficulty + 1,
+                                     list(DIFFICULTIES))
+        if changed:
+            self.level.difficulty = value - 1
+        imgui.separator()
+        changed, value = imgui.input_text("ID", self.level.id, 128,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
+            self.level.id = value
+        # Display song data
+        if changed:
+            self.level.difficulty = value - 1
+        changed_a, value = imgui.input_text("Name", self.level.name, 128,
+                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed_a:
+            self.level.name = value
+        changed_b, value = imgui.input_text("Mapper", self.level.author, 64,
+                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed_b:
+            self.level.author = value
+        # Change the level ID if needed
+        if changed_a or changed_b:
+            self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
+                                                                                                "_")
+        imgui.separator()
+        clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
+        if clicked:
+            self.menu_choice = "edit.cover"
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Click to set a cover.")
+        clicked = imgui.button("Remove Cover")
+        if clicked:
+            self.create_image(NO_COVER, COVER_ID)  # Remove the cover
+
     def file_display(self, extensions):
         """Create a file select window."""
         folder_changed, self.current_folder = imgui.input_text("Directory", self.current_folder, 65536)
@@ -168,8 +209,8 @@ class Editor:
             os.chdir(os.path.expanduser(self.current_folder))
         return False, None
 
-    def save_file_dialog(self):
-        clicked = self.file_display(["*.sspm"])  # Display a file list
+    def save_file_dialog(self, suffix):
+        clicked = self.file_display([f"*.{suffix}"])  # Display a file list
         if clicked:
             path = Path(os.path.join(self.current_folder,
                                      self.files[self.file_choice])).resolve()  # Get the absolute path of the file
@@ -187,7 +228,7 @@ class Editor:
         # Return the filepath if the save button has been clicked, return a fail case otherwise
         if imgui.button("Save"):
             self.filename = self.temp_filename
-            self.temp_filename = "out.sspm"
+            self.temp_filename = ""
             return True, os.path.join(self.current_folder, self.filename)
         return False, None
 
@@ -296,7 +337,7 @@ class Editor:
                     # TODO: make this snap with swing
                     ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
                     step = (ms_per_beat) / 4
-                    self.time = ((self.time // step) * (step)) + self.offset
+                    self.time = ((self.time // step) * (step)) - ((ms_per_beat - self.offset) % ms_per_beat)
             # Fix playback not working when playing in reverse (speed < 0)
             # This keeps going until it's being played
             if (self.playing
@@ -325,19 +366,19 @@ class Editor:
                     if event.type == sdl2.SDL_MOUSEWHEEL and level_was_hovered and not self.playing:
                         self.time_scroll(event.wheel.y, keys)
                     impl.process_event(event)
-                menu_choice = None
+                self.menu_choice = None
                 # Handle file keybinds
                 if keys[sdl2.SDL_SCANCODE_LCTRL] or keys[sdl2.SDL_SCANCODE_RCTRL]:
                     if keys[sdl2.SDLK_n] and not old_keys[sdl2.SDLK_n]:
                         # CTRL + N : New
-                        self.level = Level()
+                        self.level = SSPMLevel()
                         self.filename = None
                         self.playing = False
                         self.last_saved_hash = None
                         self.time = 0
                     if keys[sdl2.SDLK_o] and not old_keys[sdl2.SDLK_o]:
                         # CTRL + O : Open...
-                        menu_choice = "file.open"
+                        self.menu_choice = "file.open"
                     if keys[sdl2.SDLK_s] and not old_keys[sdl2.SDLK_s]:
                         # CTRL + S : Save / CTRL + SHIFT + S : Save As...
                         if self.filename is not None and not keys[sdl2.SDL_SCANCODE_LSHIFT]:
@@ -352,17 +393,17 @@ class Editor:
                                     print("Saved!")
                                     self.last_saved_hash = hash(self.level)
                         else:
-                            menu_choice = "file.saveas"
+                            self.menu_choice = "file.saveas"
                 if imgui.begin_main_menu_bar():
                     if imgui.begin_menu("File"):
                         if imgui.menu_item("New", "ctrl + n")[0]:
-                            self.level = Level()
+                            self.level = SSPMLevel()
                             self.filename = None
                             self.playing = False
                             self.last_saved_hash = None
                             self.time = 0
                         if imgui.menu_item("Open...", "ctrl + o")[0]:
-                            menu_choice = "file.open"
+                            self.menu_choice = "file.open"
                         if imgui.menu_item("Save", "ctrl + s",
                                            enabled=(self.level is not None and self.filename is not None))[0]:
                             if self.filename is not None:
@@ -377,11 +418,11 @@ class Editor:
                                         print("Saved!")
                                         self.last_saved_hash = hash(self.level)
                             else:
-                                menu_choice = "file.saveas"
+                                self.menu_choice = "file.saveas"
                         if imgui.menu_item("Save As...", "ctrl + shift + s", enabled=self.level is not None)[0]:
                             if self.filename is not None:
                                 self.temp_filename = self.filename
-                            menu_choice = "file.saveas"
+                            self.menu_choice = "file.saveas"
                         imgui.separator()
                         if imgui.menu_item("Quit", "alt + f4")[0]:
                             self.playing = False
@@ -389,50 +430,32 @@ class Editor:
                                     self.filename is not None and self.last_saved_hash is None):
                                 running = False
                             else:
-                                menu_choice = "quit.ensure"  # NOTE: The quit menu won't open if I don't do this from here
+                                self.menu_choice = "quit.ensure"  # NOTE: The quit menu won't open if I don't do this from here
                         imgui.end_menu()
                     if imgui.begin_menu("Edit", self.level is not None):
+                        changed, value = imgui.combo("Format", FORMATS.index(self.level.__class__),
+                                                     list(FORMAT_NAMES))
+                        if changed:
+                            self.level = FORMATS[value](self.level.name,
+                                                        self.level.author,
+                                                        self.level.notes,
+                                                        self.level.cover,
+                                                        self.level.audio,
+                                                        self.level.difficulty)
                         imgui.push_item_width(240)
-                        # Difficulty picker
-                        changed, value = imgui.combo("Difficulty", self.level.difficulty + 1,
-                                                     list(DIFFICULTIES))
-                        if changed:
-                            self.level.difficulty = value - 1
-                        imgui.separator()
-                        imgui.push_style_color(imgui.COLOR_TEXT, 0.7, 0.7, 0.7, 1)
-                        _, _ = imgui.input_text("ID", self.level.id, 128,
-                                                imgui.INPUT_TEXT_READ_ONLY)
-                        imgui.pop_style_color()
-                        # Display song data
-                        if changed:
-                            self.level.difficulty = value - 1
-                        changed_a, value = imgui.input_text("Name", self.level.name, 128,
-                                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-                        if changed_a:
-                            self.level.name = value
-                        changed_b, value = imgui.input_text("Author", self.level.author, 64,
-                                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-                        if changed_b:
-                            self.level.author = value
-                        # Change the level ID if needed
-                        if changed_a or changed_b:
-                            self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
-                                                                                                                "_")
-                        imgui.separator()
-                        clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
-                        if clicked:
-                            menu_choice = "edit.cover"
-                        if imgui.is_item_hovered():
-                            imgui.set_tooltip("Click to set a cover.")
-                        clicked = imgui.button("Remove Cover")
-                        if clicked:
-                            self.create_image(NO_COVER, COVER_ID)  # Remove the cover
+                        if isinstance(self.level, SSPMLevel):
+                            self.display_sspm()
+                        elif isinstance(self.level, RawDataLevel):
+                            changed, value = imgui.input_text("ID", self.level.id, 128,
+                                                              imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+                            if changed:
+                                self.level.id = value
                         imgui.separator()
                         if self.level.audio is None:
                             imgui.text("/!\\ Map has no audio")
                         clicked = imgui.button("Change song")
                         if clicked:
-                            menu_choice = "edit.song"
+                            self.menu_choice = "edit.song"
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Preferences", self.level is not None):
@@ -550,15 +573,15 @@ class Editor:
                         changed, value = imgui.checkbox("Show cursor?", self.cursor)
                         if changed:
                             self.cursor = value
-                        changed, value = imgui.input_int("Map Size", self.vis_map_size, 0)
+                        changed, value = imgui.input_float("Map Size", self.vis_map_size, 0, format="%.2f")
                         if changed:
-                            self.vis_map_size = value
+                            self.vis_map_size = max(value, 0.01)
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Tools", self.level is not None):
                         clicked = imgui.button("Offset Notes")
                         if clicked:
-                            menu_choice = "tools.offset_notes"
+                            self.menu_choice = "tools.offset_notes"
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
@@ -566,18 +589,22 @@ class Editor:
                         source_code_was_open = False
                     imgui.end_main_menu_bar()
                 # Handle popups
-                if menu_choice is not None:
-                    imgui.open_popup(menu_choice)
-                    if menu_choice == "file.open":
+                if self.menu_choice is not None:
+                    imgui.open_popup(self.menu_choice)
+                    if self.menu_choice == "file.open":
                         self.file_choice = 0
                 if imgui.begin_popup("file.open"):
                     # Open a file dialog
-                    changed, value = self.open_file_dialog([".sspm"])
+                    changed, value = self.open_file_dialog([".sspm", ".txt"])
                     if changed:
                         self.filename = value
+                        if Path(self.filename).suffix == ".sspm":
+                            level_class = SSPMLevel
+                        elif Path(self.filename).suffix == ".txt":
+                            level_class = RawDataLevel
                         with open(value, "rb") as file:
                             # Read the level from the file and load it
-                            self.level = Level.from_sspm(file)
+                            self.level = level_class.load(file)
                         # Initialize song variables
                         self.create_image(NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), COVER_ID)
                         self.time = 0
@@ -585,7 +612,11 @@ class Editor:
                         self.playback = None
                     imgui.end_popup()
                 if imgui.begin_popup("file.saveas"):
-                    changed, value = self.save_file_dialog()
+                    if isinstance(self.level, SSPMLevel):
+                        suffix = "sspm"
+                    elif isinstance(self.level, RawDataLevel):
+                        suffix = "txt"
+                    changed, value = self.save_file_dialog(suffix)
                     if changed:
                         buf = self.level.save()
                         with open(value, "wb+") as file:
@@ -780,9 +811,9 @@ class Editor:
                                         self.rects_drawn += 1
 
                             # FIXME: Copy the times display for hitsound offsets
-                            hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time + self.hitsound_offset - 1,
+                            hitsound_times = times_to_display[np.logical_and(times_to_display >= self.time + (self.hitsound_offset * self.audio_speed) - 1,
                                                                              (times_to_display) < (
-                                                                                 self.time + self.approach_rate + self.hitsound_offset))].flatten()
+                                                                                 self.time + self.approach_rate + (self.hitsound_offset * self.audio_speed)))].flatten()
 
                             note_times = times_to_display[np.logical_and(times_to_display >= self.time - 1,
                                                                          (times_to_display) < (
@@ -801,7 +832,7 @@ class Editor:
                             # Play note hit sound
                             if self.playing and self.hitsounds:
                                 if ((last_hitsound_times.size and
-                                        np.min(last_hitsound_times) < self.time + self.hitsound_offset - 1)):
+                                        np.min(last_hitsound_times) < self.time + (self.hitsound_offset * self.audio_speed) - 1)):
                                     notes = self.level.notes[np.min(last_hitsound_times)]
                                     for note in notes[:8]:
                                         pos = note[0] - 1

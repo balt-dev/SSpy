@@ -1,13 +1,14 @@
+from enum import IntEnum
 from functools import lru_cache
 from io import BytesIO
 from itertools import chain
+import traceback
 
 import numpy as np
 from PIL import Image
 from pydub import AudioSegment
 import struct
-
-import math
+from abc import ABC, abstractmethod
 
 
 def read_line(file):
@@ -17,14 +18,14 @@ def read_line(file):
     return out.decode("utf-8")
 
 
-class Level:
+class Level(ABC):
     def __init__(self,
                  name: str = "Unnamed",
                  author: str = "Unknown Author",
                  notes: dict[int, list[tuple[int, int]]] = None,
                  cover: Image.Image = None,
                  audio: AudioSegment = None,
-                 difficulty: int = -1):
+                 difficulty: int | str = -1):
         self.id = (author.lower() + " " + name.lower()).replace(" ", "_")
         self.name = name
         self.author = author
@@ -34,7 +35,7 @@ class Level:
         self.difficulty = difficulty
 
     def __str__(self):
-        return f"Level(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
+        return f"{self.__class__.__name__}(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
     def __hash__(self):
         return hash((self.id, tuple(self.notes.keys()), str(self.notes.values()), self.cover.tobytes() if self.cover is not None else None, self.audio, self.difficulty))
@@ -49,7 +50,21 @@ class Level:
         return np.sort(np.array(tuple(self.notes.keys()), dtype=np.int32))
 
     @classmethod
-    def from_sspm(cls, file):
+    @abstractmethod
+    def load(cls, file):
+        raise NotImplementedError
+
+    @abstractmethod
+    def save(self):
+        raise NotImplementedError
+
+
+class SSPMLevel(Level):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def load(cls, file):
         assert file.read(4) == b"SS+m", "Invalid file signature! Your level might be corrupted, or in the wrong format."
         assert file.read(2) == b"\x01\x00", \
             "Sorry, this doesn't support SSPM v2. Use the in-game editor."
@@ -86,7 +101,7 @@ class Level:
                 notes[timing].append((x, y))
             else:
                 notes[timing] = [(x, y)]
-        return Level(song_name, song_author, notes, cover, audio, difficulty)
+        return cls(song_name, song_author, notes, cover, audio, difficulty)
 
     def save(self):
         with BytesIO() as output:
@@ -133,12 +148,44 @@ class Level:
                     output.write(
                         timing.to_bytes(4, "little")
                     )
-                    if all([isinstance(n, int) for n in position]):
+                    if all([n == int(n) for n in position]):
                         output.write(b"\x00")
-                        output.write(position[0].to_bytes(1, "little"))
-                        output.write(position[1].to_bytes(1, "little"))
+                        output.write(int(position[0]).to_bytes(1, "little"))
+                        output.write(int(position[1]).to_bytes(1, "little"))
                     else:
                         output.write(b"\x01")
                         output.write(struct.pack("<ff", *position))
             print()
             return output.getvalue()
+
+
+class RawDataLevel(Level):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @classmethod
+    def load(cls, file):
+        notes = {}
+        data_string = file.read().decode("utf-8")
+        for note in data_string.split(",")[1:]:
+            try:
+                x, y, timing = note.split("|")
+                x, y = float(x), float(y)
+                try:
+                    notes[int(timing)].append((x, y))
+                except KeyError:
+                    notes[int(timing)] = [(x, y)]
+            except ValueError:
+                print(f"/!\ Invalid note! {note}")
+        return cls(notes=notes)
+
+    def save(self):
+        output = []
+        for timing, notes in dict(sorted(self.notes.items())).items():
+            for note in notes:
+                x = 2 - note[0]
+                y = 2 - note[1]
+                x = int(x) if int(x) == x else x
+                y = int(y) if int(y) == y else y
+                output.append(f"{2-x}|{2-y}|{timing}")
+        return (self.id + "," + ",".join(output)).encode("utf-8")
