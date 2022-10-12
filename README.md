@@ -12,6 +12,7 @@
 - [x] Audio playing
   - [x] BPM markers
 - [x] Waveform on timeline
+- [ ] Move to GLFW
 - [ ] .txt map save/load support
 - [ ] Optimizations for low-end devices
 - [ ] Vulnus .zip support
@@ -22,6 +23,14 @@
 
 To put it bluntly: I don't like Vulnus. 
 
+> What platforms does this run on?
+
+Almost any platform that supports OpenGL and Python. Windows, MacOS, and most Linux distributions should work.
+
+> What do I do if it crashes?
+
+Report it! My discord tag is in the crash message, but if you can't reach me from there, feel free to open an issue.
+
 > How do I run it?
 
 Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
@@ -31,6 +40,15 @@ cd sspy
 pip install -r requirements.txt
 python main.py
 ```
+## Troubleshooting
+
+> It's crashing and complaining about a file not found when loading a map!
+
+Check if you've added `ffmpeg` to your system PATH.
+
+> It's giving me a divide by zero error!
+
+You probably did something that doesn't make sense. Report the crash.
 
 ## Notes:
 
