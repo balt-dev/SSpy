@@ -46,7 +46,7 @@ DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasuk
 HITSOUND = AudioSegment.from_file("assets/hit.wav").set_sample_width(2)
 METRONOME_M = AudioSegment.from_file("assets/metronome_measure.wav").set_sample_width(2)
 METRONOME_B = AudioSegment.from_file("assets/metronome_beat.wav").set_sample_width(2)
-NO_COVER = None
+NO_COVER = None  # These get initialized in __init__. Yeah, not the best system...
 COVER_ID = None
 
 
@@ -295,6 +295,9 @@ class Editor:
         note_offset = None
         old_keys = self.keys()
         cursor_positions = [[0, 0]]
+        old_waveform_width = 0
+        waveform_samples = None
+        extent = 0
         # Load constant textures
         with Image.open("assets/nocover.png") as im:
             NO_COVER = im.copy()
@@ -309,6 +312,7 @@ class Editor:
                 if self.level.audio is not None:
                     if hash(self.level.audio) != old_audio:
                         audio_data = np.array(self.level.audio.get_array_of_samples())
+                        extent = np.max(np.abs(audio_data))
                         old_audio = hash(self.level.audio)
             impl.process_inputs()
             imgui.new_frame()
@@ -544,7 +548,7 @@ class Editor:
                         if not self.playing:
                             changed, value = imgui.input_int("Position (ms)", self.time, 0)
                             if changed:
-                                self.time = value
+                                self.time = abs(value)
                         if self.level.audio is not None:
                             changed, value = imgui.slider_float("Volume (db)", self.volume, -100, 10, "%.1f", 1.2)
                             if changed:
@@ -702,21 +706,20 @@ class Editor:
                                     and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
                                 length = int(self.level.audio.frame_rate * timeline_width / 1000)
-                                extent = np.max(np.abs(audio_data))
                                 waveform_width = int(
                                     size[0])
                                 # Draw waveform
                                 # FIXME: it'd be nice if this wasn't a python loop
+                                old_sample_end = np.array((0, 0))
                                 for n in range(0, waveform_width, self.waveform_res):
                                     try:
                                         # Slice a segment of audio
-                                        sample = audio_data[math.floor((n / waveform_width) * length * 2): math.floor(((n + 1) / waveform_width) * length * 2)]
-                                        if (np.max(sample) != np.min(sample)):
-                                            draw_list.add_rect_filled(x + int((w / waveform_width) * n),
-                                                                      center + int((np.max(sample) / extent) * (self.timeline_height // 2)),
-                                                                      x + int((w / waveform_width) * n) + self.waveform_res,
-                                                                      center + int((np.min(sample) / extent) * (self.timeline_height // 2)), 0x20ffffff)
-                                            self.rects_drawn += 1
+                                        sample = audio_data[math.floor((n / waveform_width) * length * 2): math.floor(((n + self.waveform_res) / waveform_width) * length * 2)]
+                                        draw_list.add_rect_filled(x + int((w / waveform_width) * n),
+                                                                  center + int((np.max(sample) / extent) * (self.timeline_height // 2)),
+                                                                  x + int((w / waveform_width) * n) + self.waveform_res,
+                                                                  center + int((np.min(sample) / extent) * (self.timeline_height // 2)), 0x20ffffff)
+                                        self.rects_drawn += 1
                                     except (IndexError, ValueError):
                                         break
                             if self.draw_notes:
@@ -726,7 +729,7 @@ class Editor:
                                     progress = note / timeline_width
                                     progress = progress if not math.isnan(progress) else 1
                                     draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
-                                                              x + int(w * progress) + 1, (y + h),
+                                                              x + int(w * progress) + 1, (y + h) - (self.timeline_height * 0.8),
                                                               color)
                                     self.rects_drawn += 1
                             # Draw currently visible area on timeline
@@ -772,42 +775,31 @@ class Editor:
                                 old_beat = current_beat
 
                                 if self.bpm_markers:
-                                    # Draw beat markers in note space
                                     position = (adjusted_x + adjusted_x + square_side) // 2, (
                                         y + y + square_side) // 2
-                                    offset_time = self.time + self.offset
-                                    line_prog = 0
-                                    index = -1
-                                    if self.bpm > 0:
-                                        while line_prog < 1:  # NOTE: This used to be a for loop, but it wasn't going far enough. I decided to just keep going until it hit the camera.
-                                            representing_beat = floor_beat - (index) + math.ceil(self.approach_rate / ms_per_beat)  # What beat this marker represents (NOTE: took me a week to figure out how to find this ._.)
-                                            decimal_beat = ((index) + ((offset_time % ms_per_beat) / ms_per_beat))
-                                            if self.swing != 0.5:
-                                                decimal_beat += adjust_swing(representing_beat, self.swing) - representing_beat
-                                            line_prog = ((decimal_beat * ms_per_beat) / (self.approach_rate))  # Distance betweeen the edge of view and the camera
-                                            if line_prog > 1:
-                                                break
-                                            draw_list.add_rect(
-                                                self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
-                                                self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
-                                                self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
-                                                self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
-                                                0xFF000000 | int(0xFF * max(0, line_prog) / (2 if representing_beat % self.time_signature[0] else 1)),
-                                                thickness=2 * max(0, line_prog) * (2 if not representing_beat % self.time_signature[0] else 1)
-                                            )
-                                            self.rects_drawn += 1
-                                            index += 1
 
                                     # Draw beat markers on timeline
                                     for beat in range(min(math.ceil(timeline_width / ms_per_beat), 10000)):
                                         on_measure = beat % self.time_signature[0] == 0
-                                        beat = adjust_swing(beat, 1 - self.swing)
-                                        beat_time = (beat * ms_per_beat) + self.offset
+                                        swung_beat = adjust_swing(beat, 1 - self.swing)
+                                        beat_time = (swung_beat * ms_per_beat) + self.offset
                                         progress = beat_time / timeline_width
                                         progress = progress if not math.isnan(progress) else 1
                                         draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
                                                                   x + int(w * progress) + 1, (y + h),
                                                                   0xff0000ff if on_measure else 0x800000ff)
+                                        if (self.time <= beat_time < self.time + self.approach_rate):
+                                            line_prog = 1 - ((beat_time - self.time) / self.approach_rate)
+                                            # Draw beat marker in note space
+                                            draw_list.add_rect(
+                                                self.adjust_pos(position[0] - (square_side // 2), position[0], line_prog),
+                                                self.adjust_pos(position[1] - (square_side // 2), position[1], line_prog),
+                                                self.adjust_pos(position[0] + (square_side // 2), position[0], line_prog),
+                                                self.adjust_pos(position[1] + (square_side // 2), position[1], line_prog),
+                                                0xFF000000 | int(0xFF * max(0, line_prog) / (2 if not on_measure else 1)),
+                                                thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
+                                            )
+                                            self.rects_drawn += 1
                                         self.rects_drawn += 1
 
                             # FIXME: Copy the times display for hitsound offsets
