@@ -12,9 +12,8 @@
 - [x] Audio playing
   - [x] BPM markers
 - [x] Waveform on timeline
-- [ ] Move to GLFW
-- [ ] .txt map save/load support
-- [ ] Optimizations for low-end devices
+- [x] .txt map save/load support
+- [x] Optimizations for low-end devices
 - [ ] Vulnus .zip support
 
 ## FAQ:
@@ -37,6 +36,7 @@ Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
 ```
 git clone [url] sspy
 cd sspy
+pip install wheel
 pip install -r requirements.txt
 python main.py
 ```
