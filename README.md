@@ -50,6 +50,10 @@ Check if you've added `ffmpeg` to your system PATH.
 
 You probably did something that doesn't make sense. Report the crash.
 
+> My song file is corrupted! What do I do?
+
+This usually happens when the level is interrupted during saving. It's good practice to make backups often.
+
 ## Notes:
 
 The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]
