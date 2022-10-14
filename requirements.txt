@@ -1,5 +1,5 @@
 wheel
-imgui
+imgui[sdl2]
 pysdl2
 pysdl2-dll
 numpy~=1.23.3

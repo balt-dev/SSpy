@@ -50,6 +50,52 @@ NO_COVER = None  # These get initialized in __init__. Yeah, not the best system.
 COVER_ID = None
 
 
+def bezier(nodes, count: int) -> dict[int, tuple[int | float, int | float]]:
+    # var k = finalnodes.Count - 1;
+    # decimal tdiff = finalnodes[k].Ms - finalnodes[0].Ms;
+    # decimal d = 1m / (divisor * k);
+    # if (!Settings.Default.CurveBezier)
+    #     d = 1m / divisor;
+    # if (Settings.Default.CurveBezier)
+    # {
+    #     for (decimal t = d; t <= 1; t += d)
+    #     {
+    #         float xf = 0;
+    #         float yf = 0;
+    #         decimal tf = finalnodes[0].Ms + tdiff * t;
+    #         for (int v = 0; v <= k; v++)
+    #         {
+    #             var note = finalnodes[v];
+    #             var bez = (double)editor.BinomialCoefficient(k, v) * (Math.Pow(1 - (double)t, k - v) * Math.Pow((double)t, v));
+    #
+    #             xf += (float)(bez * note.X);
+    #             yf += (float)(bez * note.Y);
+    #         }
+    #         finalnotes.Add(new Note(xf, yf, (long)tf));
+    #     }
+    # }
+    # This is translated from Sound Space Quantum Editor, which is written in C#. Sorry if it's not very pretty.
+    # According to the license of SSQE, this should be fine to include.
+    nodes = dict(sorted(nodes.items()))
+    k = len(nodes) - 1
+    start = min(nodes.keys())
+    end = max(nodes.keys())
+    node_delta = end - start
+    notes = {}
+    for progress in range(count - 1):
+        progress /= (count - 1)
+        time = start + node_delta * progress
+        note_pos = [0, 0]
+        for v, node in enumerate(nodes.values()):
+            bez = math.comb(k, v) * ((1 - progress) ** (k - v)) * (progress ** v)
+            note_pos[0] += node[0] * bez
+            note_pos[1] += node[1] * bez
+        notes[time] = tuple(note_pos)
+    notes[end] = tuple(nodes.values())[-1]
+    print(notes)
+    return notes
+
+
 def speed_change(sound, speed=1.0):
     if speed < 0:
         sound = sound.reverse()
@@ -135,6 +181,7 @@ class Editor:
         self.hitsound_panning = 1.0
         self.vis_map_size = 3
         self.audio_speed = 1
+        self.error = None
 
     def display_sspm(self):
         """Display the edit menu for SSPM levels."""
@@ -148,9 +195,6 @@ class Editor:
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed:
             self.level.id = value
-        # Display song data
-        if changed:
-            self.level.difficulty = value - 1
         changed_a, value = imgui.input_text("Name", self.level.name, 128,
                                             imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed_a:
@@ -204,9 +248,13 @@ class Editor:
                 imgui.close_current_popup()
                 return (True, self.files[self.file_choice])  # Return the filename
             # If the selection is a directory, go to the selected directory
-            self.current_folder = str(Path(os.path.join(self.current_folder, self.files[self.file_choice])).resolve())
-            self.file_choice = 0
-            os.chdir(os.path.expanduser(self.current_folder))
+            potential_new_dir = str(Path(os.path.join(self.current_folder, self.files[self.file_choice])).resolve())
+            try:
+                os.chdir(os.path.expanduser(potential_new_dir))
+                self.current_folder = potential_new_dir
+                self.file_choice = 0
+            except PermissionError as e:
+                self.error = e
         return False, None
 
     def save_file_dialog(self, suffix):
@@ -273,7 +321,7 @@ class Editor:
                         GL.GL_UNSIGNED_BYTE, texture_data)
         return tex_id  # NOTE: returning it makes things easier
 
-    def start(self, window, impl, font, *_):
+    def start(self, window, impl, font, default_font, *_):
         self.io = imgui.get_io()
 
         event = sdl2.SDL_Event()
@@ -295,9 +343,12 @@ class Editor:
         note_offset = None
         old_keys = self.keys()
         cursor_positions = [[0, 0]]
-        old_waveform_width = 0
-        waveform_samples = None
+        level_was_focused = False
         extent = 0
+        bezier_nodes = []
+        bezier_display_notes = {}  # TODO: Continue work on this! Line 715.
+        bezier_amount = 5
+        bezier_window_open = False
         # Load constant textures
         with Image.open("assets/nocover.png") as im:
             NO_COVER = im.copy()
@@ -319,7 +370,7 @@ class Editor:
             keys = self.keys()
             mouse = tuple(self.io.mouse_down)
             # Check if the song needs to be paused/played
-            if keys[sdl2.SDLK_SPACE] and self.level is not None:
+            if keys[sdl2.SDLK_SPACE] and self.level is not None and level_was_focused:
                 if not old_keys[sdl2.SDLK_SPACE]:
                     self.playing = not self.playing
                 space_last = True
@@ -583,9 +634,10 @@ class Editor:
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Tools", self.level is not None):
-                        clicked = imgui.button("Offset Notes")
-                        if clicked:
+                        if imgui.button("Offset Notes"):
                             self.menu_choice = "tools.offset_notes"
+                        if imgui.button("Bezier"):
+                            bezier_window_open = True
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
@@ -593,10 +645,9 @@ class Editor:
                         source_code_was_open = False
                     imgui.end_main_menu_bar()
                 # Handle popups
-                if self.menu_choice is not None:
+                if self.menu_choice == "file.open":
                     imgui.open_popup(self.menu_choice)
-                    if self.menu_choice == "file.open":
-                        self.file_choice = 0
+                    self.file_choice = 0
                 if imgui.begin_popup("file.open"):
                     # Open a file dialog
                     changed, value = self.open_file_dialog([".sspm", ".txt"])
@@ -615,6 +666,8 @@ class Editor:
                         self.playing = False
                         self.playback = None
                     imgui.end_popup()
+                if self.menu_choice is not None and self.menu_choice != "file.open":
+                    imgui.open_popup(self.menu_choice)
                 if imgui.begin_popup("file.saveas"):
                     if isinstance(self.level, SSPMLevel):
                         suffix = "sspm"
@@ -678,6 +731,55 @@ class Editor:
                         note_offset = None
                         imgui.close_current_popup()
                     imgui.end_popup()
+                if bezier_window_open and imgui.begin("Bezier"):
+                    imgui.text("Create a bezier curve from notes.")
+                    imgui.push_item_width(120)
+                    imgui.columns(2)
+                    imgui.separator()
+                    imgui.text("Time")
+                    imgui.set_column_width(-1, 80)
+                    imgui.next_column()
+                    imgui.text("Position")
+                    imgui.separator()
+                    imgui.next_column()
+                    times = [part[0] for part in bezier_nodes]
+                    for i, (timing, position) in enumerate(bezier_nodes):
+                        changed, value = imgui.input_int(f"##{i}time", timing, 0)
+                        if changed:
+                            while value in times:
+                                value += 1
+                            bezier_nodes[i] = (value, position)
+                        imgui.next_column()
+                        changed, value = imgui.input_float2(f"##{i}pos", *position, format="%.3f")
+                        if changed:
+                            bezier_nodes[i] = (timing, value)
+                        imgui.same_line()
+                        if imgui.button(f"-##{i}del", 26, 26):
+                            del bezier_nodes[i]
+                        imgui.next_column()
+                    if imgui.button(f"+##add", 26, 26):
+                        add_time = self.time
+                        while add_time in times:
+                            add_time += 1
+                        bezier_nodes.append((add_time, (0, 0)))
+                    imgui.columns(1)
+                    imgui.separator()
+                    changed, value = imgui.input_int("Notes on Path", bezier_amount, 0)
+                    if changed:
+                        bezier_amount = max(2, value)
+                    if imgui.button("Close"):
+                        bezier_window_open = False
+                    imgui.same_line(spacing=10)
+                    if len(bezier_nodes) > 1:
+                        bezier_display_notes = bezier(dict(bezier_nodes), bezier_amount)
+                        if imgui.button("Place"):
+                            for timing, position in bezier_display_notes.items():
+                                if timing in self.level.notes:
+                                    self.level.notes[int(timing)].append(position)
+                                else:
+                                    self.level.notes[int(timing)] = [position]
+                    imgui.pop_item_width()
+                    imgui.end()
 
                 if self.level is not None:
                     size = self.io.display_size
@@ -690,17 +792,18 @@ class Editor:
                         x, y = imgui.get_window_position()
                         w, h = imgui.get_content_region_available()
                         if imgui.begin_child("nodrag", 0, 0, False, ):
+                            level_was_focused = imgui.is_window_focused()
                             draw_list = imgui.get_window_draw_list()
                             timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
                             # Draw the main UI background
                             square_side = min(w - self.timeline_height, h - self.timeline_height)
                             draw_list.add_rect_filled(x, y, x + w, y + h, 0xff080808)
                             adjusted_x = (((x + w) / 2) - (square_side / 2))
-                            draw_list.add_rect_filled(adjusted_x, y, adjusted_x + square_side, y + square_side,
+                            box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
+                            draw_list.add_rect_filled(*box,
                                                       0xff000000)
                             draw_list.add_rect_filled(x, (y + h) - self.timeline_height, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
-
                             times_to_display = self.level.get_notes()
                             if (self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
@@ -710,15 +813,14 @@ class Editor:
                                     size[0])
                                 # Draw waveform
                                 # FIXME: it'd be nice if this wasn't a python loop
-                                old_sample_end = np.array((0, 0))
                                 for n in range(0, waveform_width, self.waveform_res):
                                     try:
                                         # Slice a segment of audio
                                         sample = audio_data[math.floor((n / waveform_width) * length * 2): math.floor(((n + self.waveform_res) / waveform_width) * length * 2)]
                                         draw_list.add_rect_filled(x + int((w / waveform_width) * n),
-                                                                  center + int((np.max(sample) / extent) * (self.timeline_height // 2)),
+                                                                  center + int((np.max(sample) / (extent / 0.8)) * (self.timeline_height // 2)),
                                                                   x + int((w / waveform_width) * n) + self.waveform_res,
-                                                                  center + int((np.min(sample) / extent) * (self.timeline_height // 2)), 0x20ffffff)
+                                                                  center + int((np.min(sample) / (extent / 0.8)) * (self.timeline_height // 2)), 0x20ffffff)
                                         self.rects_drawn += 1
                                     except (IndexError, ValueError):
                                         break
@@ -785,7 +887,7 @@ class Editor:
                                         beat_time = (swung_beat * ms_per_beat) + self.offset
                                         progress = beat_time / timeline_width
                                         progress = progress if not math.isnan(progress) else 1
-                                        draw_list.add_rect_filled(x + int(w * progress), (y + h) - self.timeline_height,
+                                        draw_list.add_rect_filled(x + int(w * progress), (y + h) - (self.timeline_height * 0.2),
                                                                   x + int(w * progress) + 1, (y + h),
                                                                   0xff0000ff if on_measure else 0x800000ff)
                                         if (self.time <= beat_time < self.time + self.approach_rate):
@@ -817,9 +919,8 @@ class Editor:
                                     rgb, a = rgba & 0xFFFFFF, (rgba & 0xFF000000) >> 24
                                     progress = 1 - ((note_time - self.time) / self.approach_rate)
                                     self.draw_note(draw_list, note,
-                                                   (adjusted_x, y, adjusted_x + square_side, y + square_side), progress,
+                                                   box, progress,
                                                    color=rgb, alpha=a)
-                                    self.rects_drawn += 1
 
                             # Play note hit sound
                             if self.playing and self.hitsounds:
@@ -828,9 +929,28 @@ class Editor:
                                     notes = self.level.notes[np.min(last_hitsound_times)]
                                     for note in notes[:8]:
                                         pos = note[0] - 1
-                                        panning = pos * self.hitsound_panning
+                                        panning = (pos / (self.vis_map_size / 2)) * self.hitsound_panning
                                         _play_with_simpleaudio(HITSOUND.pan(min(max(panning, -1), 1)))
                             last_hitsound_times = hitsound_times
+
+                            # XXX: copy/pasted code :/
+                            if len(bezier_display_notes) and bezier_window_open:
+                                if len(bezier_nodes):
+                                    for note_time, note in bezier_nodes[::-1]:  # Invert to draw from back to front
+                                        progress = 1 - ((note_time - self.time) / self.approach_rate)
+                                        if 0 < progress <= 1:
+                                            handle_size = ((square_side / self.vis_map_size) / 1.25) * (1 / (1 + ((1 - progress) * self.approach_distance)))
+                                            abs_position = self.note_pos_to_abs_pos(note,
+                                                                                    box,
+                                                                                    progress)
+                                            draw_list.add_circle_filled(*abs_position, handle_size / 8, (int(0x80 * progress) << 24) | 0x00FFFF)
+
+                                for note_time in tuple(bezier_display_notes.keys())[::-1]:  # Invert to draw from back to front
+                                    note = bezier_display_notes[note_time]
+                                    progress = 1 - ((note_time - self.time) / self.approach_rate)
+                                    self.draw_note(draw_list, note,
+                                                   box, progress,
+                                                   color=0xFFFF00, alpha=0x80, size=0.75)
 
                             level_was_hovered = imgui.is_window_hovered()
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
@@ -840,14 +960,18 @@ class Editor:
                                             (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
                                 time_arr = time_arr[
-                                    np.logical_and(time_arr - self.time >= -1, time_arr - self.time < 10)]
+                                    np.logical_and(time_arr - self.time >= -1, time_arr - self.time < self.approach_rate)]
                                 closest_time = np.min(time_arr) if time_arr.size > 0 else self.time
                                 closest_index = None
                                 closest_dist = None
                                 # Note deletion
                                 if mouse[1] and not old_mouse[1]:
                                     for i, note in enumerate(self.level.notes.get(closest_time, ())):
-                                        if abs(note[0] - note_pos[0]) < 0.5 and abs(note[1] - note_pos[1]) < 0.5:
+                                        p_scale = 1 / self.perspective_scale(progress)
+                                        print(note)
+                                        note = (((note[0] - 1) * p_scale) + 1, ((note[1] - 1) * p_scale) + 1)
+                                        print(note, note_pos, p_scale)
+                                        if abs(note[0] - note_pos[0]) < (0.5 / p_scale) and abs(note[1] - note_pos[1]) < (0.5 / p_scale):
                                             if closest_dist is None:
                                                 closest_index = i
                                                 closest_dist = math.sqrt((abs(note[0] - note_pos[0]) ** 2) + (
@@ -866,9 +990,8 @@ class Editor:
                                     np_y = adjust(note_pos[1], self.note_snapping[1])
                                     note_pos = (np_x, np_y)
                                     self.draw_note(draw_list, note_pos,
-                                                   (adjusted_x, y, adjusted_x + square_side, y + square_side), 1.0,
+                                                   box, 1.0,
                                                    color=0xffff00, alpha=0x40)
-                                    self.rects_drawn += 1
                                     if mouse[0] and not old_mouse[0]:
                                         if int(self.time) in self.level.notes:
                                             self.level.notes[int(self.time)].append(note_pos)
@@ -887,7 +1010,7 @@ class Editor:
                                     start_pos = np.array(self.level.notes[start]).reshape(-1, 2).mean(0)
                                     end_pos = np.array(self.level.notes[end]).reshape(-1, 2).mean(0)
                                     # FIXME: this is copied from draw_note and kinda sucks ass
-                                    box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
+
                                     center = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
                                     spacing = ((box[2] - box[0]) / self.vis_map_size)
                                     def position(pos): return [center[0] + ((pos[0] - 1) * spacing), center[1] + ((pos[1] - 1) * spacing)]
@@ -925,7 +1048,21 @@ class Editor:
                         if mouse[0]:
                             was_resizing_timeline = True
                             self.timeline_height = max(5, (y + h) - mouse_pos[1])
-
+                # Error window
+                if self.error is not None:
+                    imgui.open_popup("Error!")
+                    if imgui.begin_popup_modal("Error!")[0]:
+                        imgui.push_font(default_font)
+                        tb = "\n".join(traceback.format_exception(self.error)).rstrip("\n")
+                        imgui.input_text_multiline("##error", tb, len(tb),
+                                                   7 * max([len(line) for line in tb.split("\n")]) + 40,
+                                                   imgui.get_text_line_height_with_spacing() * len(tb.split("\n")),
+                                                   flags=imgui.INPUT_TEXT_READ_ONLY)
+                        imgui.pop_font()
+                        if imgui.button("Close"):
+                            imgui.close_current_popup()
+                            self.error = None
+                        imgui.end_popup()
             old_mouse = mouse
             old_keys = keys
             GL.glClearColor(0., 0., 0., 1)
@@ -945,17 +1082,28 @@ class Editor:
         visual_size = 1 / (1 + ((1 - progress) * self.approach_distance))
         return (cen * visual_size) + (pos * (1 - visual_size))
 
-    def draw_note(self, draw_list, note_pos, box, progress, color=0xFFFFFF, alpha=0xff):
+    def perspective_scale(self, progress):
+        return 1 / (1 + ((1 - progress) * self.approach_distance))
+
+    def note_pos_to_abs_pos(self, note_pos, box, progress):
         center = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
         spacing = ((box[2] - box[0]) / self.vis_map_size)
-        note_size = spacing / 1.25
-        position = (center[0] + ((note_pos[0] - 1) * spacing), center[1] + ((note_pos[1] - 1) * spacing))
-        v = 1 / (1 + ((1 - progress) * self.approach_distance))
-        color_part = int(0xFF * progress)
-        draw_list.add_rect(self.adjust_pos(position[0] - (note_size // 2), center[0], progress),
-                           self.adjust_pos(position[1] - (note_size // 2), center[1], progress),
-                           self.adjust_pos(position[0] + (note_size // 2), center[0], progress),
-                           self.adjust_pos(position[1] + (note_size // 2), center[1], progress),
-                           (alpha << 24) | (int(color_part * (((color & 0xFF0000) >> 16) / 0xFF)) << 16) |
-                           (int((color_part * (((color & 0xFF00) >> 8)) / 0xFF)) << 8) |
-                           int((color_part * (color & 0xFF)) / 0xFF), thickness=(note_size // 8) * v)
+        position = (center[0] + ((note_pos[0] - 1) * spacing),
+                    center[1] + ((note_pos[1] - 1) * spacing))
+        position = (self.adjust_pos(position[0], center[0], progress),
+                    self.adjust_pos(position[1], center[1], progress))
+        return position
+
+    def draw_note(self, draw_list, note_pos, box, progress, color=0xFFFFFF, alpha=0xff, size=1.0):
+        if progress <= 1:
+            spacing = ((box[2] - box[0]) / self.vis_map_size)
+            visual_scale = (spacing / 1.25) * self.perspective_scale(progress)
+            note_size = visual_scale * size
+            color_part = int(0xFF * progress)
+            position = self.note_pos_to_abs_pos(note_pos, box, progress)
+            draw_list.add_rect(position[0] - note_size // 2, position[1] - note_size // 2,
+                               position[0] + note_size // 2, position[1] + note_size // 2,
+                               max((alpha << 24) | (int(color_part * (((color & 0xFF0000) >> 16) / 0xFF)) << 16) |
+                                   (int((color_part * (((color & 0xFF00) >> 8)) / 0xFF)) << 8) |
+                                   int((color_part * (color & 0xFF)) / 0xFF), 0), thickness=max((note_size // 8), 0))
+            self.rects_drawn += 1

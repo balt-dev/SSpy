@@ -14,12 +14,12 @@ def main():
     window, gl_ctx = init()
     imgui.create_context()
     style = imgui.get_style()
-    font = imgui_style.set(style)
+    default_font, font = imgui_style.set(style)
     impl = SDL2Renderer(window)
     impl.refresh_font_texture()
     editor = loop.Editor()
     try:
-        editor.start(window, impl, font, gl_ctx)
+        editor.start(window, impl, font, default_font, gl_ctx)
     except Exception:  # Don't catch KeyboardInterrupt
         print("-------------------")
         print("If you're seeing this, the app encountered a fatal error and had to close.")
