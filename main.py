@@ -35,7 +35,7 @@ def main():
 
 
 def init():
-    width, height = 800, 600
+    width, height = 1366, 768
     window_name = "If you see this as a window name, something's wrong."
     if sdl2.SDL_Init(sdl2.SDL_INIT_EVERYTHING) < 0:
         print("Error: SDL could not initialize! SDL Error: " + sdl2.SDL_GetError().decode("utf-8"))
