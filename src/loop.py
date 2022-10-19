@@ -245,7 +245,7 @@ class Editor:
             use_bpm = not (keys[sdl2.SDL_SCANCODE_LALT] or keys[sdl2.SDL_SCANCODE_RALT]) and (
                 self.bpm != 0)  # If either alt key is pressed, or there's no bpm markers to base it off of
             if use_bpm:
-                current_beat = (self.time - self.offset) / (ms_per_beat)
+                current_beat = (self.time) / (ms_per_beat)
                 if keys[sdl2.SDL_SCANCODE_LSHIFT] or keys[sdl2.SDL_SCANCODE_RSHIFT]:
                     increment = self.time_signature[0]
                 elif keys[sdl2.SDL_SCANCODE_LCTRL] or keys[sdl2.SDL_SCANCODE_RCTRL]:
@@ -675,7 +675,7 @@ class Editor:
                     if changed:
                         with Image.open(value) as im:
                             self.level.cover = im.copy()
-                            self.create_image(self.level.cover, COVER_ID)
+                            self.create_image(self.level.cover, self.COVER_ID)
                     imgui.end_popup()
                 if imgui.begin_popup("edit.song"):
                     # Load the selected audio
