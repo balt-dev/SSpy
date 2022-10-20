@@ -3,6 +3,7 @@ import sys
 import traceback
 import imgui
 import sdl2
+import sdl2.sdlimage
 from imgui.integrations.sdl2 import SDL2Renderer
 import OpenGL.GL as gl
 import src.loop as loop
@@ -73,6 +74,10 @@ def init():
     if sdl2.SDL_GL_SetSwapInterval(0) < 0:
         print("Warning: Unable to set VSync! SDL Error: " + sdl2.SDL_GetError().decode("utf-8"))
         exit(1)
+
+    image = sdl2.sdlimage.IMG_Load(b"assets/icon.png")
+    sdl2.SDL_SetWindowIcon(window, image)
+    sdl2.SDL_FreeSurface(image)
 
     return window, gl_context
 
