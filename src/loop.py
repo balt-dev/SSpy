@@ -92,7 +92,7 @@ class Editor:
         self.level = None
         self.time = 0
         self.playing = False
-        self.last_saved_hash = None
+        self.changed_since_save = True
         self.playback = None
         self.time_signature = (4, 4)
         self.beat_divisor = 4
@@ -146,11 +146,13 @@ class Editor:
                                      list(DIFFICULTIES))
         if changed:
             self.level.difficulty = value - 1
+            self.changed_since_save = True
         imgui.separator()
         changed, value = imgui.input_text("ID", self.level.id, 128,
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed:
             self.level.id = value
+            self.changed_since_save = True
         changed_a, value = imgui.input_text("Name", self.level.name, 128,
                                             imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed_a:
@@ -163,6 +165,7 @@ class Editor:
         if changed_a or changed_b:
             self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
                                                                                                 "_")
+            self.changed_since_save = True
         imgui.separator()
         clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
         if clicked:
@@ -172,6 +175,8 @@ class Editor:
         clicked = imgui.button("Remove Cover")
         if clicked:
             self.create_image(self.NO_COVER, self.COVER_ID)  # Remove the cover
+            self.level.cover = None
+            self.changed_since_save = True
 
     def file_display(self, extensions):
         """Create a file select window."""
@@ -320,10 +325,10 @@ class Editor:
             # Check if the audio data needs to be updated
             if self.level is not None:
                 if self.level.audio is not None:
-                    if hash(self.level.audio) != old_audio:
+                    if self.level.audio != old_audio:
                         audio_data = np.array(self.level.audio.get_array_of_samples())
                         extent = np.max(np.abs(audio_data))
-                        old_audio = hash(self.level.audio)
+                        old_audio = self.level.audio
             impl.process_inputs()
             imgui.new_frame()
             keys = self.keys()
@@ -365,7 +370,7 @@ class Editor:
                 sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
             elif self.filename is None:  # Does the level exist as a file?
                 sdl2.SDL_SetWindowTitle(window, "*Unnamed - SSPy".encode("utf-8"))
-            elif self.last_saved_hash != hash(self.level):  # Has the level been saved?
+            elif self.changed_since_save:  # Has the level been saved?
                 sdl2.SDL_SetWindowTitle(window, f"*{self.filename} - SSPy".encode("utf-8"))
             else:
                 sdl2.SDL_SetWindowTitle(window, f"{self.filename} - SSPy".encode("utf-8"))
@@ -374,7 +379,7 @@ class Editor:
                     # Handle quitting the app
                     if event.type == sdl2.SDL_QUIT:
                         self.playing = False
-                        if self.last_saved_hash == hash(self.level):
+                        if not self.changed_since_save:
                             running = False
                         else:
                             imgui.open_popup("quit.ensure")
@@ -394,7 +399,7 @@ class Editor:
                         self.playback = None
                         self.filename = None
                         self.playing = False
-                        self.last_saved_hash = None
+                        self.changed_since_save = True
                         self.time = 0
                     if keys[sdl2.SDLK_o] and not old_keys[sdl2.SDLK_o]:
                         # CTRL + O : Open...
@@ -411,7 +416,7 @@ class Editor:
                                     print("!!!!!!! FILE DID NOT SAVE CORRECTLY.")
                                 else:
                                     print("Saved!")
-                                    self.last_saved_hash = hash(self.level)
+                                    self.changed_since_save = False
                         else:
                             self.menu_choice = "file.saveas"
                 if imgui.begin_main_menu_bar():
@@ -424,7 +429,7 @@ class Editor:
                                 self.playback.stop()
                             self.filename = None
                             self.playing = False
-                            self.last_saved_hash = None
+                            self.changed_since_save = True
                             self.time = 0
                         if imgui.menu_item("Open...", "ctrl + o")[0]:
                             self.menu_choice = "file.open"
@@ -440,7 +445,7 @@ class Editor:
                                         print("!!!!!!! FILE DID NOT SAVE CORRECTLY.")
                                     else:
                                         print("Saved!")
-                                        self.last_saved_hash = hash(self.level)
+                                        self.changed_since_save = False
                             else:
                                 self.menu_choice = "file.saveas"
                         if imgui.menu_item("Save As...", "ctrl + shift + s", enabled=self.level is not None)[0]:
@@ -450,8 +455,7 @@ class Editor:
                         imgui.separator()
                         if imgui.menu_item("Quit", "alt + f4")[0]:
                             self.playing = False
-                            if self.last_saved_hash == hash(self.level) or (
-                                    self.filename is not None and self.last_saved_hash is None):
+                            if not self.changed_since_save:
                                 running = False
                             else:
                                 self.menu_choice = "quit.ensure"  # NOTE: The quit menu won't open if I don't do this from here
@@ -466,6 +470,7 @@ class Editor:
                                                         self.level.cover,
                                                         self.level.audio,
                                                         self.level.difficulty)
+                            self.changed_since_save = True
                         imgui.push_item_width(240)
                         if isinstance(self.level, SSPMLevel):
                             self.display_sspm()
@@ -474,6 +479,7 @@ class Editor:
                                                               imgui.INPUT_TEXT_AUTO_SELECT_ALL)
                             if changed:
                                 self.level.id = value
+                                self.changed_since_save = True
                         imgui.separator()
                         if self.level.audio is None:
                             imgui.text("/!\\ Map has no audio")
@@ -538,7 +544,7 @@ class Editor:
                             changed, value = imgui.input_int("Time Signature", self.time_signature[1], 0)
                             if changed:
                                 self.time_signature = (
-                                    self.time_signature[0], min(max(1 << (value - 1).bit_length(), 1), 256))
+                                    self.time_signature[0], min(max(value, 1), 256))
                             changed, value = imgui.input_int("Beat Divisor", self.beat_divisor, 0)
                             if changed:
                                 self.beat_divisor = min(max(value, 1), 100000)
@@ -666,7 +672,7 @@ class Editor:
                                 print("!!!!!!! FILE DID NOT SAVE CORRECTLY. DO NOT CLOSE THE APP YET.")
                             else:
                                 print("Saved!")
-                                self.last_saved_hash = hash(self.level)
+                                self.changed_since_save = False
                         imgui.close_current_popup()
                     imgui.end_popup()
                 if imgui.begin_popup("edit.cover"):
@@ -676,12 +682,14 @@ class Editor:
                         with Image.open(value) as im:
                             self.level.cover = im.copy()
                             self.create_image(self.level.cover, self.COVER_ID)
+                        self.changed_since_save = True
                     imgui.end_popup()
                 if imgui.begin_popup("edit.song"):
                     # Load the selected audio
                     changed, value = self.open_file_dialog([".mp3", ".ogg", ".wav", ".flac", ".opus"])
                     if changed:
                         self.level.audio = AudioSegment.from_file(value).set_sample_width(2)
+                        self.changed_since_save = True
                     imgui.end_popup()
                 if imgui.begin_popup("quit.ensure"):
                     imgui.text("You have unsaved changes!")
@@ -712,6 +720,7 @@ class Editor:
                             new_notes[timing - note_offset] = pos
                         self.level.notes = new_notes
                         note_offset = None
+                        self.changed_since_save = True
                         imgui.close_current_popup()
                     imgui.end_popup()
                 if bulk_delete_window_open and imgui.begin("Bulk Delete"):
@@ -742,9 +751,9 @@ class Editor:
                         times = times[np.logical_and(bulk_delete_start_time <= times, times <= bulk_delete_end_time)]
                         for note_time in times:
                             del self.level.notes[note_time]
+                        self.changed_since_save = True
                     imgui.end()
                 if spline_window_open:
-                    print("Open!")
                     imgui.set_next_window_size(0, 0)
                     imgui.set_next_window_position(0, 0, imgui.APPEARING)
                     if imgui.begin("Spline"):
@@ -804,6 +813,7 @@ class Editor:
                                         self.level.notes[int(timing)].append(position)
                                     else:
                                         self.level.notes[int(timing)] = [position]
+                                    self.changed_since_save = True
                         imgui.pop_item_width()
                         imgui.end()
 
@@ -884,7 +894,7 @@ class Editor:
                                 draw_list.add_text(
                                     center_of_view(m_text),
                                     y + h - (self.timeline_height + 60), 0x80FFFFFF, m_text)
-                                b_text = f"Beat {f'{current_beat % self.time_signature[0]:.2f}'.rstrip('0').rstrip('.')}"
+                                b_text = f"Beat {f'{current_beat % (self.time_signature[0] / (self.time_signature[1] / 4)):.2f}'.rstrip('0').rstrip('.')}"
                                 draw_list.add_text(
                                     center_of_view(b_text),
                                     y + h - (self.timeline_height + 40), 0x80FFFFFF, b_text)
@@ -905,7 +915,7 @@ class Editor:
                                         y + y + square_side) // 2
 
                                     # Draw beat markers on timeline
-                                    for beat in range(min(math.ceil(timeline_width / ms_per_beat) * self.beat_divisor, 5000)):
+                                    for beat in range(min(math.ceil(timeline_width / ms_per_beat) * self.beat_divisor, 5000) + 1):
                                         beat /= self.beat_divisor
                                         on_measure = not (beat % self.time_signature[0])
                                         on_beat = not (beat % 1)
@@ -1009,6 +1019,7 @@ class Editor:
                                         del self.level.notes[int(closest_time)][closest_index]
                                         if len(self.level.notes[int(closest_time)]) == 0:
                                             del self.level.notes[int(closest_time)]
+                                        self.changed_since_save = True
                                 # Draw the note under the cursor
                                 if not self.playing:
                                     np_x = adjust(note_pos[0], self.note_snapping[0])
@@ -1024,6 +1035,7 @@ class Editor:
                                             self.level.notes[int(math.ceil(self.time))].append(note_pos)
                                         else:
                                             self.level.notes[int(math.ceil(self.time))] = [note_pos]
+                                        self.changed_since_save = True
                                     if keys[sdl2.SDLK_s] and spline_window_open:
                                         spline_nodes[int(self.time)] = note_pos
 

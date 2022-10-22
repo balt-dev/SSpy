@@ -37,15 +37,10 @@ class Level(ABC):
     def __str__(self):
         return f"{self.__class__.__name__}(author: {self.author}, cover: {self.cover}, difficulty: {self.difficulty}, id: {self.id}, name: {self.name}, notes: ({len(self.notes)} notes))"
 
-    def __hash__(self):
-        return hash((self.id, tuple(self.notes.keys()), str(self.notes.values()), self.cover.tobytes() if self.cover is not None else None, self.audio, self.difficulty))
-
-    @lru_cache
     def get_end(self):
         times_to_display = self.get_notes()
         return (np.max(times_to_display) if times_to_display.shape[0] > 0 else 1000)
 
-    @lru_cache
     def get_notes(self):
         return np.sort(np.array(tuple(self.notes.keys()), dtype=np.int32))
 
