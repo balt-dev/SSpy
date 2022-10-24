@@ -34,7 +34,7 @@ Report it! My discord tag is in the crash message, but if you can't reach me fro
 
 Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
 ```
-git clone [url] sspy
+git clone https://github.com/balt-dev/SSpy/ sspy
 cd sspy
 pip install wheel
 pip install -r requirements.txt
