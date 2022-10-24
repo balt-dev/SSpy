@@ -659,16 +659,20 @@ class Editor:
                             level_class = RawDataLevel
                         with open(value, "rb") as file:
                             # Read the level from the file and load it
-                            self.level = level_class.load(file)
-                        notes_changed = True
-                        times_to_display = None
-                        # Initialize song variables
-                        self.create_image(self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), self.COVER_ID)
-                        self.time = 0
-                        self.playing = False
-                        if self.playback is not None:
-                            self.playback.stop()
-                        self.playback = None
+                            try:
+                                self.level = level_class.load(file)
+                            except Exception as e:
+                                self.error = e
+                        if self.error is None:
+                            notes_changed = True
+                            times_to_display = None
+                            # Initialize song variables
+                            self.create_image(self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), self.COVER_ID)
+                            self.time = 0
+                            self.playing = False
+                            if self.playback is not None:
+                                self.playback.stop()
+                            self.playback = None
                     imgui.end_popup()
                 if self.menu_choice is not None and self.menu_choice != "file.open":
                     imgui.open_popup(self.menu_choice)
