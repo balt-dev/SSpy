@@ -35,6 +35,7 @@ FORMATS: tuple = (SSPMLevel, RawDataLevel)
 FORMAT_NAMES: tuple = ("SS+ Map", "Raw Data")
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file("assets/hit.wav").set_sample_width(2)
+MISSSOUND = AudioSegment.from_file("assets/miss.wav").set_sample_width(2)
 METRONOME_M = AudioSegment.from_file("assets/metronome_measure.wav").set_sample_width(2)
 METRONOME_B = AudioSegment.from_file("assets/metronome_beat.wav").set_sample_width(2)
 
@@ -130,6 +131,7 @@ class Editor:
         self.vis_map_size = 3
         self.audio_speed = 1
         self.error = None
+        self.playtesting = False
 
     def adjust_swing(self, beat):
         b = (beat % 2)
@@ -302,6 +304,7 @@ class Editor:
         old_keys = self.keys()
         cursor_positions = [[0, 0]]
         level_was_hovered = False
+        mouse_hidden = False
         extent = 0
         spline_nodes = {}
         spline_display_notes = {}
@@ -401,6 +404,8 @@ class Editor:
                         self.playing = False
                         self.changed_since_save = True
                         self.time = 0
+                        self.create_image(self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), self.COVER_ID)
+
                     if keys[sdl2.SDLK_o] and not old_keys[sdl2.SDLK_o]:
                         # CTRL + O : Open...
                         self.menu_choice = "file.open"
@@ -431,6 +436,7 @@ class Editor:
                             self.playing = False
                             self.changed_since_save = True
                             self.time = 0
+                            self.create_image(self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192), Image.NEAREST), self.COVER_ID)
                         if imgui.menu_item("Open...", "ctrl + o")[0]:
                             self.menu_choice = "file.open"
                         if imgui.menu_item("Save", "ctrl + s",
@@ -618,6 +624,11 @@ class Editor:
                             spline_window_open = True
                         if imgui.button("Bulk Delete"):
                             bulk_delete_window_open = True
+                        changed, value = imgui.checkbox("Playtesting?", self.playtesting)
+                        if changed:
+                            self.playtesting = value
+                        if imgui.is_item_hovered():
+                            imgui.set_tooltip("Note that there's a hit window of 1 ms, because it's much easier to just hook hit detection into the hitsound code.\nYou're not as bad as it looks, trust me.")
                         imgui.end_menu()
                     if imgui.begin_menu("Info", self.level is not None):
                         imgui.text(f"Notes: {len(self.level.notes)}")
@@ -840,6 +851,8 @@ class Editor:
                                                       0xff000000)
                             draw_list.add_rect_filled(x, (y + h) - self.timeline_height, x + w, (y + h), 0x20ffffff)
                             self.rects_drawn += 3
+                            note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1,
+                                        (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1)
                             if (self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
@@ -942,10 +955,11 @@ class Editor:
                                             self.rects_drawn += 1
                                         self.rects_drawn += 1
                             if times_to_display is not None:
-                                # FIXME: Copy the times display for hitsound offsets
-                                hitsound_times = times_to_display[np.logical_and(times_to_display >= int(self.time) + (self.hitsound_offset * self.audio_speed) - 1,
+                                # FIXME: Copy the times display for hitsound offsets :(
+                                hitsound_times = times_to_display[np.logical_and(times_to_display >= int(self.time) + (self.hitsound_offset / self.audio_speed) - 1,
                                                                                  (times_to_display) < (
                                     int(self.time) + self.approach_rate + (self.hitsound_offset * self.audio_speed)))].flatten()
+                                # FIXME: Copy the times display AGAIN for playtesting :((
                                 note_times = times_to_display[np.logical_and(times_to_display - self.time >= 0,
                                                                              (times_to_display) < (
                                                                                  self.time + self.approach_rate))].flatten()
@@ -962,12 +976,15 @@ class Editor:
                                 # Play note hit sound
                                 if self.playing and self.hitsounds:
                                     if ((last_hitsound_times.size and
-                                            np.min(last_hitsound_times) < self.time + (self.hitsound_offset * self.audio_speed) - 1)):
+                                            np.min(last_hitsound_times) < self.time + (self.hitsound_offset / self.audio_speed) - 1)):
                                         notes = self.level.notes[np.min(last_hitsound_times)]
                                         for note in notes[:8]:
                                             pos = note[0] - 1
                                             panning = (pos / (self.vis_map_size / 2)) * self.hitsound_panning
-                                            _play_with_simpleaudio(HITSOUND.pan(min(max(panning, -1), 1)))
+                                            if not self.playtesting or (abs(note[0] - note_pos[0]) < (0.57) and abs(note[1] - note_pos[1]) < (0.57)):
+                                                _play_with_simpleaudio(HITSOUND.pan(min(max(panning, -1), 1)))
+                                            else:
+                                                _play_with_simpleaudio(MISSSOUND.pan(min(max(panning, -1), 1)))
                                 last_hitsound_times = hitsound_times
                             # XXX: copy/pasted code :/
                             if len(spline_display_notes) and spline_window_open:
@@ -990,9 +1007,8 @@ class Editor:
 
                             if ((adjusted_x <= mouse_pos[0] < adjusted_x + square_side) and
                                     (y <= mouse_pos[1] < y + square_side)) and level_was_hovered:
+                                sdl2.SDL_ShowCursor(not (self.playtesting and imgui.is_window_focused() and imgui.is_window_hovered()))
                                 # Note placing and deleting
-                                note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1,
-                                            (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1)
                                 time_arr = np.array(tuple(self.level.notes.keys()))
                                 time_arr = time_arr[
                                     np.logical_and(time_arr - self.time >= -1, time_arr - self.time < self.approach_rate)]
@@ -1024,29 +1040,31 @@ class Editor:
                                 if not self.playing:
                                     np_x = adjust(note_pos[0], self.note_snapping[0])
                                     np_y = adjust(note_pos[1], self.note_snapping[1])
-                                    note_pos = (np_x, np_y)
-                                    self.draw_note(draw_list, note_pos,
+                                    draw_note_pos = (np_x, np_y)
+                                    self.draw_note(draw_list, draw_note_pos,
                                                    box, 1.0,
                                                    color=0xffff00, alpha=0x40)
                                     if mouse[0] and not old_mouse[0]:
                                         notes_changed = True
                                         times_to_display = None
                                         if int(math.ceil(self.time)) in self.level.notes:
-                                            self.level.notes[int(math.ceil(self.time))].append(note_pos)
+                                            self.level.notes[int(math.ceil(self.time))].append(draw_note_pos)
                                         else:
-                                            self.level.notes[int(math.ceil(self.time))] = [note_pos]
+                                            self.level.notes[int(math.ceil(self.time))] = [draw_note_pos]
                                         self.changed_since_save = True
                                     if keys[sdl2.SDLK_s] and spline_window_open:
-                                        spline_nodes[int(self.time)] = note_pos
-
+                                        spline_nodes[int(self.time)] = draw_note_pos
+                            else:
+                                sdl2.SDL_ShowCursor(True)
                             # Draw cursor
-                            if self.cursor and len(self.level.notes) > 0:
+                            if self.cursor and (len(self.level.notes) or self.playtesting):
                                 notes = self.level.get_notes()
-                                start = np.min(notes)
-                                end = np.max(notes)
-                                if (end - start):
+                                if len(notes):
+                                    start = np.min(notes)
+                                    end = np.max(notes)
+                                if self.playtesting or (end - start):
                                     progress = (self.time - start) / (end - start)
-                                    if cursor_spline is None or notes_changed:
+                                    if (cursor_spline is None or notes_changed) and not self.playtesting:
                                         nodes = []
                                         for timing, notes in dict(sorted(self.level.notes.items())).items():
                                             node_x, node_y = 0, 0
@@ -1058,7 +1076,10 @@ class Editor:
                                         cursor_spline = CubicSpline(nodes[:, 0], nodes[:, 1:])
 
                                     def position(pos): return self.note_pos_to_abs_pos(pos, box, 1)
-                                    cursor_positions = [position(cursor_spline(self.time - t)) for t in range(0, 75, 1)]
+                                    if self.playtesting:
+                                        cursor_positions = [position(note_pos)] + cursor_positions[:6]  # NOTE: using a .insert breaks because of None
+                                    else:
+                                        cursor_positions = [position(cursor_spline(self.time - t)) for t in range(0, 75, 1)]
                                     draw_list.add_circle_filled(*cursor_positions[0], (square_side / self.vis_map_size) / 20, 0xFFFFFFFF, num_segments=32)
                                 else:
                                     cursor_positions = []
