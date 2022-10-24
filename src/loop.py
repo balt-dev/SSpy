@@ -81,8 +81,8 @@ class Editor:
         self.io = None
         self.bpm = 120
         self.offset = 0
-        self.approach_rate = 500
-        self.approach_distance = 10
+        self.approach_rate = 1100
+        self.approach_distance = 30
         self.snapping = None
         self.level_window_size = (200, 200)
         self.filename = None
@@ -132,6 +132,7 @@ class Editor:
         self.audio_speed = 1
         self.error = None
         self.playtesting = False
+        self.sensitivity = 2.0
 
     def adjust_swing(self, beat):
         b = (beat % 2)
@@ -629,6 +630,10 @@ class Editor:
                             self.playtesting = value
                         if imgui.is_item_hovered():
                             imgui.set_tooltip("Note that there's a hit window of 1 ms, because it's much easier to just hook hit detection into the hitsound code.\nYou're not as bad as it looks, trust me.")
+                        if self.playtesting:
+                            changed, value = imgui.input_float("Sensitivity", self.sensitivity, 0, format="%.2f")
+                            if changed:
+                                self.sensitivity = value
                         imgui.end_menu()
                     if imgui.begin_menu("Info", self.level is not None):
                         imgui.text(f"Notes: {len(self.level.notes)}")
@@ -853,6 +858,7 @@ class Editor:
                             self.rects_drawn += 3
                             note_pos = ((((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1,
                                         (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (self.vis_map_size / 2) + 1)
+                            cursor_pos = (((note_pos[0] - 1) * self.sensitivity) + 1, ((note_pos[1] - 1) * self.sensitivity) + 1)
                             if (self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
@@ -959,7 +965,6 @@ class Editor:
                                 hitsound_times = times_to_display[np.logical_and(times_to_display >= int(self.time) + (self.hitsound_offset / self.audio_speed) - 1,
                                                                                  (times_to_display) < (
                                     int(self.time) + self.approach_rate + (self.hitsound_offset * self.audio_speed)))].flatten()
-                                # FIXME: Copy the times display AGAIN for playtesting :((
                                 note_times = times_to_display[np.logical_and(times_to_display - self.time >= 0,
                                                                              (times_to_display) < (
                                                                                  self.time + self.approach_rate))].flatten()
@@ -981,7 +986,7 @@ class Editor:
                                         for note in notes[:8]:
                                             pos = note[0] - 1
                                             panning = (pos / (self.vis_map_size / 2)) * self.hitsound_panning
-                                            if not self.playtesting or (abs(note[0] - note_pos[0]) < (0.57) and abs(note[1] - note_pos[1]) < (0.57)):
+                                            if not self.playtesting or (abs(note[0] - cursor_pos[0]) < (0.57) and abs(note[1] - cursor_pos[1]) < (0.57)):
                                                 _play_with_simpleaudio(HITSOUND.pan(min(max(panning, -1), 1)))
                                             else:
                                                 _play_with_simpleaudio(MISSSOUND.pan(min(max(panning, -1), 1)))
@@ -1077,7 +1082,7 @@ class Editor:
 
                                     def position(pos): return self.note_pos_to_abs_pos(pos, box, 1)
                                     if self.playtesting:
-                                        cursor_positions = [position(note_pos)] + cursor_positions[:6]  # NOTE: using a .insert breaks because of None
+                                        cursor_positions = [position(cursor_pos)] + cursor_positions[:6]  # NOTE: using a .insert breaks because of None
                                     else:
                                         cursor_positions = [position(cursor_spline(self.time - t)) for t in range(0, 75, 1)]
                                     draw_list.add_circle_filled(*cursor_positions[0], (square_side / self.vis_map_size) / 20, 0xFFFFFFFF, num_segments=32)
