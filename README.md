@@ -1,4 +1,4 @@
-# SSPy - A python-based level editor for SS+ (or Sound Space)
+# SSPy - A python-based level editor for [SS+](https://chedski.itch.io/sound-space-plus) (or [Sound Space](https://www.roblox.com/games/2677609345/FREE-Sound-Space-Music-Rhythm))
 
 
 
@@ -20,7 +20,7 @@
 
 > Why is Vulnus support at the back of the roadmap?
 
-To put it bluntly: I don't like Vulnus. 
+To put it bluntly: I don't like it. I have my reasons why.
 
 > What platforms does this run on?
 
@@ -34,7 +34,7 @@ Report it! My discord tag is in the crash message, but if you can't reach me fro
 
 Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
 ```
-git clone [url] sspy
+git clone https://github.com/balt-dev/SSpy/ sspy
 cd sspy
 pip install wheel
 pip install -r requirements.txt
