@@ -20,7 +20,7 @@
 
 > Why is Vulnus support at the back of the roadmap?
 
-To put it bluntly: I don't like Vulnus. 
+To put it bluntly: I don't like it. I have my reasons why.
 
 > What platforms does this run on?
 
