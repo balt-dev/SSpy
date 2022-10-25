@@ -62,6 +62,7 @@ The code behind the file picker was taken from https://github.com/Zygahedron/Par
 [1]: https://i.imgur.com/7JyRsjb.png (Permission proof)
 
 ## Gallery
+[![YT link to SSPy Demo](https://img.youtube.com/vi/30xzC9m12Xg/0.jpg)](https://www.youtube.com/watch?v=30xzC9m12Xg)
 ![Screenshot_2022-10-12_19-52-11](https://user-images.githubusercontent.com/59123926/195474222-8ba3a165-2e4d-4bd2-820a-be3030b87f91.png)
 ![Screenshot_2022-10-12_19-50-23](https://user-images.githubusercontent.com/59123926/195474223-afc23cc3-d870-45e6-902e-eda1d004826e.png)
 ![Screenshot_2022-10-12_19-50-13](https://user-images.githubusercontent.com/59123926/195474224-f43697fe-108e-4e56-bf78-96bbc33d405b.png)
