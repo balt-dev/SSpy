@@ -24,8 +24,10 @@ def main():
     except Exception:  # Don't catch KeyboardInterrupt
         print("-------------------")
         print("If you're seeing this, the app encountered a fatal error and had to close.")
-        print("Please send this traceback to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
+        print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
         print("-------------------", end="")
+        with open("crashlog.txt", "w+") as f:
+            f.write(traceback.format_exc())
         raise
     finally:
         print()
