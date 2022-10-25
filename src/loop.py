@@ -418,7 +418,7 @@ class Editor:
                     if keys[sdl2.SDLK_s] and not old_keys[sdl2.SDLK_s]:
                         # CTRL + S : Save / CTRL + SHIFT + S : Save As...
                         if self.filename is not None and not keys[sdl2.SDL_SCANCODE_LSHIFT]:
-                            buf = self.level.save(self.bpm, self.offset)
+                            buf = self.level.save(self.bpm, self.offset, self.time_signature, self.swing)
                             with open(self.filename, "wb+") as file:
                                 file.write(buf)
                             # Check for corruption
@@ -448,7 +448,7 @@ class Editor:
                         if imgui.menu_item("Save", "ctrl + s",
                                            enabled=(self.level is not None and self.filename is not None))[0]:
                             if self.filename is not None:
-                                buf = self.level.save(self.bpm, self.offset)
+                                buf = self.level.save(self.bpm, self.offset, self.time_signature, self.swing)
                                 with open(self.filename, "wb+") as file:
                                     file.write(buf)
                                 # Check for corruption
