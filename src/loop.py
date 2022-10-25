@@ -52,15 +52,6 @@ def spline(nodes, count):
     return notes
 
 
-def speed_change(sound, speed=1.0):
-    if speed < 0:
-        sound = sound.reverse()
-    sound_with_altered_frame_rate = sound._spawn(sound.raw_data, overrides={
-        "frame_rate": int(sound.frame_rate * abs(speed))
-    })
-    return sound_with_altered_frame_rate.set_frame_rate(sound.frame_rate)
-
-
 def play_at_position(audio, position):
     try:
         cut_audio = audio[int(position * 1000):]
@@ -133,6 +124,20 @@ class Editor:
         self.error = None
         self.playtesting = False
         self.sensitivity = 2.0
+
+    def speed_change(self, sound, speed=1.0):
+        if speed < 0:
+            sound = sound.reverse()
+        try:
+            assert sound.duration_seconds / speed < 3600, "The audio that was going to be played is too large.\nIf you want to circumvent this check, go to line 133 in src/loop.py and remove lines 132 through 137."
+        except AssertionError as e:
+            self.error = e
+            self.playing = False
+            return AudioSegment.silent(duration=1)
+        sound_with_altered_frame_rate = sound._spawn(sound.raw_data, overrides={
+            "frame_rate": int(sound.frame_rate * abs(speed))
+        })
+        return sound_with_altered_frame_rate.set_frame_rate(sound.frame_rate)
 
     def adjust_swing(self, beat):
         b = (beat % 2)
@@ -348,7 +353,7 @@ class Editor:
                 space_last = False
             if self.playing and not was_playing:
                 if self.level.audio is not None:
-                    self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
+                    self.playback = play_at_position(self.speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
                 self.starting_time = time.perf_counter_ns()
                 self.starting_position = self.time
             elif not self.playing and was_playing:
@@ -368,7 +373,7 @@ class Editor:
                 and self.playback is None
                 and self.level.audio is not None
                     and self.time / 1000 <= self.level.audio.duration_seconds):
-                self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
+                self.playback = play_at_position(self.speed_change(self.level.audio + self.volume, self.audio_speed), ((self.time) / 1000) / self.audio_speed)
             # Set the window name
             if self.level is None:  # Is a level open?
                 sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
@@ -413,7 +418,7 @@ class Editor:
                     if keys[sdl2.SDLK_s] and not old_keys[sdl2.SDLK_s]:
                         # CTRL + S : Save / CTRL + SHIFT + S : Save As...
                         if self.filename is not None and not keys[sdl2.SDL_SCANCODE_LSHIFT]:
-                            buf = self.level.save()
+                            buf = self.level.save(self.bpm, self.offset)
                             with open(self.filename, "wb+") as file:
                                 file.write(buf)
                             # Check for corruption
@@ -443,7 +448,7 @@ class Editor:
                         if imgui.menu_item("Save", "ctrl + s",
                                            enabled=(self.level is not None and self.filename is not None))[0]:
                             if self.filename is not None:
-                                buf = self.level.save()
+                                buf = self.level.save(self.bpm, self.offset)
                                 with open(self.filename, "wb+") as file:
                                     file.write(buf)
                                 # Check for corruption
@@ -592,11 +597,11 @@ class Editor:
                                 # Change the volume of the song if it's playing
                                 if self.playback is not None:
                                     self.playback.stop()
-                                    self.playback = play_at_position(speed_change(self.level.audio + self.volume, self.audio_speed), (self.time) / 1000)
-                        if not self.playing:  # NOTE: If I don't stop it from being changed while playing, wacky shit happens and self.time gets set to NaN somehow. No thanks.
+                                    self.playback = play_at_position(self.speed_change(self.level.audio + self.volume, self.audio_speed), (self.time) / 1000)
+                        if not self.playing:  # NOTE: If I don't stop it from being changed while playing, wacky stuff happens and self.time gets set to NaN somehow. No thanks.
                             changed, value = imgui.input_float("Playback Speed", self.audio_speed, 0, format="%.2f")
                             if changed:
-                                self.audio_speed = max(min(value, 3.4e38), -3.4e38) if value != 0 else 1
+                                self.audio_speed = (max(min(value, 3.4e38), -3.4e38) if abs(value) > 0.05 else (value / abs(value)) * max(abs(value), 0.05)) if value != 0 else 0.05
                         changed, value = imgui.checkbox("Play hitsounds?", self.hitsounds)
                         if changed:
                             self.hitsounds = value
@@ -660,7 +665,12 @@ class Editor:
                         with open(value, "rb") as file:
                             # Read the level from the file and load it
                             try:
-                                self.level = level_class.load(file)
+                                self.level, metadata = level_class.load(file)
+                                if metadata is not None:
+                                    self.bpm = metadata[0]
+                                    self.offset = metadata[1]
+                                    self.time_signature = metadata[2]
+                                    self.swing = metadata[3]
                             except Exception as e:
                                 self.error = e
                         if self.error is None:
@@ -683,7 +693,7 @@ class Editor:
                         suffix = "txt"
                     changed, value = self.save_file_dialog(suffix)
                     if changed:
-                        buf = self.level.save()
+                        buf = self.level.save(self.bpm, self.offset, self.time_signature, self.swing)
                         with open(value, "wb+") as file:
                             file.write(buf)
                         # Check for corruption
@@ -1030,14 +1040,10 @@ class Editor:
                                         p_scale = 1 / self.perspective_scale(progress)
                                         note = (((note[0] - 1) * p_scale) + 1, ((note[1] - 1) * p_scale) + 1)
                                         if abs(note[0] - note_pos[0]) < (0.5 / p_scale) and abs(note[1] - note_pos[1]) < (0.5 / p_scale):
-                                            if closest_dist is None:
+                                            d = math.sqrt((abs(note[0] - note_pos[0]) ** 2) + (abs(note[1] - note_pos[1]) ** 2))
+                                            if closest_dist is None or closest_dist > d:
                                                 closest_index = i
-                                                closest_dist = math.sqrt((abs(note[0] - note_pos[0]) ** 2) + (
-                                                    abs(note[1] - note_pos[1]) ** 2))
-                                            elif closest_dist > (d := math.sqrt((abs(note[0] - note_pos[0]) ** 2) + (
-                                                    abs(note[1] - note_pos[1]) ** 2))):
                                                 closest_dist = d
-                                                closest_index = i
                                     if closest_index is not None:
                                         notes_changed = True
                                         times_to_display = None

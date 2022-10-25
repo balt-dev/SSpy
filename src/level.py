@@ -2,6 +2,7 @@ from enum import IntEnum
 from functools import lru_cache
 from io import BytesIO
 from itertools import chain
+import time
 import traceback
 
 import numpy as np
@@ -50,7 +51,7 @@ class Level(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def save(self):
+    def save(self, *_):
         raise NotImplementedError
 
 
@@ -96,9 +97,18 @@ class SSPMLevel(Level):
                 notes[timing].append((x, y))
             else:
                 notes[timing] = [(x, y)]
-        return cls(song_name, song_author, notes, cover, audio, difficulty)
+        metadata = True
+        try:
+            assert file.read(4) == b"SSPy"
+            bpm = struct.unpack("d", file.read(8))[0]
+            offset = int.from_bytes(file.read(4), "little")
+            time_signature = struct.unpack("HH", file.read(4))
+            swing = struct.unpack("d", file.read(8))[0]
+        except (EOFError, AssertionError):
+            metadata = False
+        return cls(song_name, song_author, notes, cover, audio, difficulty), (bpm, offset, time_signature, swing) if metadata else None
 
-    def save(self):
+    def save(self, bpm, offset, time_signature, swing):
         with BytesIO() as output:
             print("Writing metadata...")
             output.write(b"SS+m\x01\x00\x00\x00")
@@ -131,8 +141,7 @@ class SSPMLevel(Level):
                 print(f"Writing song...")
                 output.write(b"\x01")
                 with BytesIO() as audio_data:
-                    # XXX: this leads to compression rot over multiple saves, after 50 saves or so the music isn't really listenable anymore
-                    self.audio.export(audio_data, format="ogg")
+                    self.audio.export(audio_data)
                     output.write(
                         audio_data.seek(0, 2).to_bytes(8, "little")
                     )
@@ -150,6 +159,12 @@ class SSPMLevel(Level):
                     else:
                         output.write(b"\x01")
                         output.write(struct.pack("<ff", *position))
+            # Write metadata past the notes, SS+ allows this
+            output.write(b"SSPy")
+            output.write(struct.pack("d", bpm))
+            output.write(offset.to_bytes(4, "little"))
+            output.write(struct.pack("<HH", *time_signature))
+            output.write(struct.pack("d", swing))
             print()
             return output.getvalue()
 
@@ -172,9 +187,9 @@ class RawDataLevel(Level):
                     notes[int(timing)] = [(x, y)]
             except ValueError:
                 print(f"/!\ Invalid note! {note}")
-        return cls(notes=notes)
+        return cls(notes=notes), None
 
-    def save(self):
+    def save(self, *_):
         output = []
         for timing, notes in dict(sorted(self.notes.items())).items():
             for note in notes:
