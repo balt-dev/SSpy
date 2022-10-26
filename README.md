@@ -13,6 +13,7 @@
   - [x] BPM markers
 - [x] Waveform on timeline
 - [x] .txt map save/load support
+- [ ] Investigate performance issues on Windows
 - [ ] Optimizations for low-end devices
 - [ ] Vulnus .zip support
 
