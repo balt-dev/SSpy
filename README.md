@@ -13,7 +13,7 @@
   - [x] BPM markers
 - [x] Waveform on timeline
 - [x] .txt map save/load support
-- [x] Optimizations for low-end devices
+- [ ] Optimizations for low-end devices
 - [ ] Vulnus .zip support
 
 ## FAQ:
@@ -28,7 +28,9 @@ Almost any platform that supports OpenGL and Python. Windows, MacOS, and most Li
 
 > What do I do if it crashes?
 
-Report it! My discord tag is in the crash message, but if you can't reach me from there, feel free to open an issue.
+Report it! My discord tag is in the crash message, but if you can't reach me from there, feel free to open an issue.\
+When the program crashes, an error message is written to `crashlog.txt` in the directory you ran the program from.\
+Include this in your crash report, it helps me diagnose the issue.
 
 > How do I run it?
 
@@ -56,6 +58,7 @@ This usually happens when the level is interrupted during saving. It's good prac
 
 ## Notes
 
+This is still beta software! Don't be surprised if it crashes. Report the crash to me and I'll handle it.\
 The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]
 
 
