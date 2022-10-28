@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import ctypes
 import sys
 import traceback
@@ -7,6 +8,9 @@ import sdl2.sdlimage
 from imgui.integrations.sdl2 import SDL2Renderer
 import OpenGL.GL as gl
 import src.loop as loop
+from pathlib import Path
+import os
+
 
 import src.style as imgui_style
 
@@ -21,14 +25,14 @@ def main():
     editor = loop.Editor()
     try:
         editor.start(window, impl, font, default_font, gl_ctx)
-    except Exception:  # Don't catch KeyboardInterrupt
+    except Exception as e:  # Don't catch KeyboardInterrupt
         print("-------------------")
         print("If you're seeing this, the app encountered a fatal error and had to close.")
         print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
-        print("-------------------", end="")
+        print("-------------------")
         with open("crashlog.txt", "w+") as f:
             f.write(traceback.format_exc())
-        raise
+        traceback.print_exc()
     finally:
         print()
         impl.shutdown()
@@ -77,7 +81,7 @@ def init():
         print("Warning: Unable to set VSync! SDL Error: " + sdl2.SDL_GetError().decode("utf-8"))
         exit(1)
 
-    image = sdl2.sdlimage.IMG_Load(b"assets/icon.png")
+    image = sdl2.sdlimage.IMG_Load(f"{Path(__file__).resolve().parent}{os.sep}assets{os.sep}icon.png".encode("utf-8"))
     sdl2.SDL_SetWindowIcon(window, image)
     sdl2.SDL_FreeSurface(image)
 
