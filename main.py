@@ -25,7 +25,7 @@ def main():
     editor = loop.Editor()
     try:
         editor.start(window, impl, font, default_font, gl_ctx)
-    except Exception as e:  # Don't catch KeyboardInterrupt
+    except Exception:  # Don't catch KeyboardInterrupt
         print("-------------------")
         print("If you're seeing this, the app encountered a fatal error and had to close.")
         print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")

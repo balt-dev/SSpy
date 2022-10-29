@@ -261,7 +261,7 @@ class VulnusLevel(Level):
                 metadata = json.load(f)
             metadata["_difficulties"].append(f"{filename}.json")
         except FileNotFoundError:
-            metadata["_difficulties"] = [f"{filename}.json"]
+            metadata = {"_difficulties": [f"{filename}.json"]}
         metadata_temp = {"_artist": (self.name.split(" - "))[0], "_title": (self.name.split(" - "))[1],
                          "_mappers": self.author.split(", "), "_music": "audio.wav", "_version": 1, "_sspy": {
             "bpm": bpm,
