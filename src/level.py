@@ -66,7 +66,7 @@ class SSPMLevel(Level):
             assert f.read(
                 4) == b"SS+m", "Invalid f signature! Your level might be corrupted, or in the wrong format."
             assert f.read(2) == b"\x01\x00", \
-                "Sorry, this doesn't support SSPM v2. Use the in-game editor."
+                "Sorry, this doesn't support SSPM v2. Use the in-game editor or switch to the sspmv2 branch."
             assert f.read(2) == b"\x00\x00", \
                 "Reserved bits aren't 0. Is this a modchart?"
             read_line(f)
@@ -146,7 +146,7 @@ class SSPMLevel(Level):
                 print(f"Writing song...")
                 output.write(b"\x01")
                 with BytesIO() as audio_data:
-                    self.audio.export(audio_data)
+                    self.audio.export(audio_data, format="ogg")
                     output.write(
                         audio_data.seek(0, 2).to_bytes(8, "little")
                     )
