@@ -14,6 +14,7 @@
 - [x] Waveform on timeline
 - [x] .txt map save/load support
 - [x] Vulnus support
+- [x] In-editor playtesting
 - [ ] Investigate performance issues on Windows
 - [ ] Optimizations for low-end devices
 
