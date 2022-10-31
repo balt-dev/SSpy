@@ -87,5 +87,4 @@ The code behind the file picker was taken from https://github.com/Zygahedron/Par
 [1]: https://i.imgur.com/7JyRsjb.png (Permission proof)
 
 ## Gallery
-[![YT link to SSPy Demo](https://img.youtube.com/vi/30xzC9m12Xg/0.jpg)](https://www.youtube.com/watch?v=30xzC9m12Xg)\
-[YouTube link]
+`TODO: make a demo of the editor in action`
