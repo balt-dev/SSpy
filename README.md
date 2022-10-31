@@ -1,4 +1,4 @@
-# SSPy - A python-based level editor for [SS+](https://chedski.itch.io/sound-space-plus) (or [Sound Space](https://www.roblox.com/games/2677609345/FREE-Sound-Space-Music-Rhythm))
+# SSPy - A python-based level editor for [SS+](https://chedski.itch.io/sound-space-plus), [Sound Space](https://www.roblox.com/games/2677609345/FREE-Sound-Space-Music-Rhythm), and [Vulnus](https://beat-game-dev.github.io/Vulnus/)
 
 
 
