@@ -34,18 +34,34 @@ Report it! My discord tag is in the crash message, but if you can't reach me fro
 When the program crashes, an error message is written to `crashlog.txt` in the directory you ran the program from.\
 Include this in your crash report, it helps me diagnose the issue.
 
-> How do I run it?
+## Installation
 
-Install `git`, `git-lfs`, `python`, and `ffmpeg` if you haven't, then
-```
-git clone https://github.com/balt-dev/SSpy/ sspy
-cd sspy
-pip install wheel
-pip install -r requirements.txt
-python main.py
-```
+First, you're going to need Python. This is developed on Python 3.10.8.
+### Windows
+- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/python-310/9PJPW5LDXLZ5)\
+### Linux
+- You can probably get Python 3.10 using your package manager.
+### Universal
+- If you don't fall into either of the two above, you can get it [from the official website.](https://www.python.org/downloads/release/python-3108/)
 
-Make sure your python is up to date. I develop on Python v3.10.
+You're also going to need ffmpeg. Same story as with Python:
+### Windows
+- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/ffmpeg/9NB2FLX7X7WG)\
+### Linux
+- ffmpeg should be in your package manager.
+### Universal
+- You can get a download from the [ffmpeg website.](https://ffmpeg.org/download.html)
+
+Next, you're going to need a local copy of the repository.
+- If you have `git` installed, you can run `git clone https://github.com/balt-dev/SSpy/ sspy` in the command prompt to get it.
+- Otherwise, you can [download and extract the repository as a zip file.](https://github.com/balt-dev/SSpy/archive/refs/heads/master.zip)
+
+Finally, you need to install the python libraries that this runs on.\
+You can do this by running `pip install -r requirements.txt` (or `pip3` if `pip` isn't found) in the command prompt in the directory you extracted/cloned into.\
+- If you get an error about missing Microsoft Visual C build tools, follow the link it gives you and install those.
+
+If everything goes right, you should be able to run the program by running `python main.py` in the command prompt.\
+If you're getting errors past that, please create a bug report.
 
 ## Troubleshooting
 
