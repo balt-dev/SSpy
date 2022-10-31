@@ -38,7 +38,7 @@ Include this in your crash report, it helps me diagnose the issue.
 
 First, you're going to need Python. This is developed on Python 3.10.8.
 ### Windows
-- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/python-310/9PJPW5LDXLZ5)\
+- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/python-310/9PJPW5LDXLZ5)
 ### Linux
 - You can probably get Python 3.10 using your package manager.
 ### Universal
@@ -46,7 +46,7 @@ First, you're going to need Python. This is developed on Python 3.10.8.
 
 You're also going to need ffmpeg. Same story as with Python:
 ### Windows
-- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/ffmpeg/9NB2FLX7X7WG)\
+- If you're on Windows 10, you can [get it on the Microsoft Store.](https://apps.microsoft.com/store/detail/ffmpeg/9NB2FLX7X7WG)
 ### Linux
 - ffmpeg should be in your package manager.
 ### Universal
