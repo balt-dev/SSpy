@@ -57,7 +57,8 @@ Next, you're going to need a local copy of the repository.
 - Otherwise, you can [download and extract the repository as a zip file.](https://github.com/balt-dev/SSpy/archive/refs/heads/master.zip)
 
 Finally, you need to install the python libraries that this runs on.\
-You can do this by running `pip install -r requirements.txt` (or `pip3` if `pip` isn't found) in the command prompt in the directory you extracted/cloned into.\
+You can do this by running `pip install -r requirements.txt` (or `pip3` if `pip` isn't found)\
+in the command prompt in the directory you extracted/cloned into.
 - If you get an error about missing Microsoft Visual C build tools, follow the link it gives you and install those.
 
 If everything goes right, you should be able to run the program by running `python main.py` in the command prompt.\
