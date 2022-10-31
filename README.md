@@ -13,15 +13,16 @@
   - [x] BPM markers
 - [x] Waveform on timeline
 - [x] .txt map save/load support
+- [x] Vulnus support
 - [ ] Investigate performance issues on Windows
 - [ ] Optimizations for low-end devices
-- [ ] Vulnus .zip support
+
 
 ## FAQ:
 
-> Why is Vulnus support at the back of the roadmap?
+> What's up with the previous versions of the FAQ?
 
-To put it bluntly: I don't like it. I have my reasons why.
+I was unreasonably angry at the Vulnus community. I don't hold those views anymore, and I'm sorry if they disturbed you.
 
 > What platforms does this run on?
 
