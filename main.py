@@ -25,14 +25,14 @@ def main():
     editor = loop.Editor()
     try:
         editor.start(window, impl, font, default_font, gl_ctx)
-    except Exception:  # Don't catch KeyboardInterrupt
-        print("-------------------")
-        print("If you're seeing this, the app encountered a fatal error and had to close.")
-        print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
-        print("-------------------")
-        with open("crashlog.txt", "w+") as f:
-            f.write(traceback.format_exc())
-        traceback.print_exc()
+    # except Exception:  # Don't catch KeyboardInterrupt
+    #    print("-------------------")
+    #    print("If you're seeing this, the app encountered a fatal error and had to close.")
+    #    print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
+    #    print("-------------------")
+    #    with open("crashlog.txt", "w+") as f:
+    #        f.write(traceback.format_exc())
+    #    traceback.print_exc()
     finally:
         print()
         impl.shutdown()

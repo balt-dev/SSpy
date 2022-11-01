@@ -1,7 +1,10 @@
+import base64
+import binascii
 import ctypes
 import glob
 import math
 import os
+import random
 import sys
 import time
 import traceback
@@ -76,6 +79,7 @@ def adjust(x, s): return (((round(((x) / 2) * (s - 1)) / (s - 1)) * 2)) if s != 
 
 class Editor:
     def __init__(self):
+        self.adding_field = ""
         self.times_to_display = None
         self.notes_changed = False
         self.starting_position = None
@@ -143,6 +147,7 @@ class Editor:
         self.error = None
         self.playtesting = False
         self.sensitivity = 2.0
+        self.unique_label_counter = 0
 
     def speed_change(self, sound, speed=1.0):
         if speed < 0:
@@ -168,6 +173,110 @@ class Editor:
         else:
             return (beat - b) + (((2 * s) / (2 - 2 * s)) * (b - 2 * s) + 2 - 2 * s)
 
+    def display_variable(self, index, var, var_type, arr_type=None, _from_array=False):
+        elabel = '-'.join([str(n) for n in index])
+        if not _from_array:
+            changed, value = imgui.combo(f"Type##{elabel}", var_type - 1,
+                                         ["8-bit Unsigned Integer",
+                                          "16-bit Unsigned Integer",
+                                          "32-bit Unsigned Integer",
+                                          "64-bit Unsigned Integer",
+                                          "Float",
+                                          "Double",
+                                          "Position",
+                                          "Short Bytes",
+                                          "Short String",
+                                          "Long Bytes",
+                                          "Long String",
+                                          "Array"]
+                                         )
+            if changed:
+                return (True, None, value + 1, arr_type)
+        if var_type in range(1, 5):
+            if var is None:
+                var = 0
+            changed, value = imgui.input_text(f"Value##int-{elabel}", str(var), 256,
+                                              flags=imgui.INPUT_TEXT_CHARS_DECIMAL)  # imgui only does up to 2**32
+            try:
+                value = int(value)
+            except ValueError:
+                value = var
+            value = value % (16 ** (2 ** var_type))
+        elif var_type in [5, 6]:
+            if var is None:
+                var = 0.0
+            changed, value = imgui.input_double(f"Value##double-{elabel}", var, 0, format="%.5f")
+        elif var_type == 7:
+            if var is None:
+                var = (0.0, 0.0)
+            changed, value = imgui.input_float2(f"Value##float2-{elabel}", *var, "%.2f")
+        elif var_type in range(8, 12):
+            if var is None:
+                var = "" if var_type % 2 else b""
+            if var_type > 10:
+                f = imgui.input_text_multiline
+                l = 65536
+            else:
+                f = imgui.input_text
+                l = 256
+            if not var_type % 2:
+                l = math.ceil(l * 1.33334)
+                v = base64.b64encode(var).decode("utf-8")
+            else:
+                v = var
+            changed, value = f(f"Value##{elabel}", v, l)
+            if changed and not var_type % 2:
+                try:
+                    value = base64.b64decode(value)
+                except binascii.Error:
+                    changed = False
+        else:
+            if var is None:
+                var = [[0, 1, 1]]
+            if arr_type is None:
+                arr_type = 1
+            changed, arr_value = imgui.combo("Array Type", arr_type - 1,
+                                             ["8-bit Unsigned Integer",
+                                              "16-bit Unsigned Integer",
+                                              "32-bit Unsigned Integer",
+                                              "64-bit Unsigned Integer",
+                                              "Float",
+                                              "Double",
+                                              "Position",
+                                              "Short Bytes",
+                                              "Short String",
+                                              "Long Bytes",
+                                              "Long String"]
+                                             )
+            if changed:
+                value = [[None, 0, 0] for _ in range(len(var))]  # * len(var) doesn't work
+                var_type = var_type
+                arr_type = arr_value + 1
+            else:
+                imgui.indent()
+                for i, val in enumerate(var):
+                    vl, vr_t, ar_t = val
+                    vr_t = arr_type
+                    c, v, v_t, a_t = self.display_variable([*index, i], vl, vr_t, ar_t, _from_array=True)
+                    if c:
+                        var[i][0] = v
+                        var[i][1] = v_t
+                        var[i][2] = a_t
+                        changed = True
+                        value = var
+                        print(var)
+                    imgui.same_line()
+                    if imgui.button(f"-##{elabel}-del-arr", 26, 26):
+                        del var[i]
+                        changed = True
+                        value = var
+                if imgui.button(f"+##{elabel}-add-arr", 26, 26):
+                    var.append([None, var_type, arr_type])
+                    changed = True
+                    value = var
+                imgui.unindent()
+        return changed, value, var_type, arr_type
+
     def display_sspm(self):
         """Display the edit menu for SSPM levels."""
         # Difficulty picker
@@ -187,18 +296,20 @@ class Editor:
         if changed:
             self.level.id = value
             self.changed_since_save = True
-        changed_a, value = imgui.input_text("Name", self.level.name, 128,
-                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-        if changed_a:
+        changed, value = imgui.input_text("Map Name", self.level.name, 128,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
             self.level.name = value
-        changed_b, value = imgui.input_text("Mapper", self.level.author, 64,
-                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-        if changed_b:
-            self.level.author = value
-        # Change the level ID if needed
-        if changed_a or changed_b:
-            self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
-                                                                                                "_")
+            self.changed_since_save = True
+        changed, value = imgui.input_text("Song Name", self.level.song_name, 128,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
+            self.level.song_name = value
+            self.changed_since_save = True
+        changed, value = imgui.input_text("Mappers", ", ".join(self.level.authors), 256,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
+            self.level.authors = value.split(", ")
             self.changed_since_save = True
         imgui.separator()
         clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
@@ -211,6 +322,40 @@ class Editor:
             self.create_image(self.NO_COVER, self.COVER_ID)  # Remove the cover
             self.level.cover = None
             self.changed_since_save = True
+        imgui.separator()
+        # custom_fields=fields, marker_types=marker_types, markers=markers,
+        #                            modchart=modchart, rating=rating
+        changed, value = imgui.checkbox("Modchart?", self.level.modchart)
+        if changed:
+            self.level.modchart = value
+        changed, value = imgui.input_int("Rating", self.level.rating, 0)
+        if changed:
+            self.level.rating = value
+        expanded, visible = imgui.collapsing_header("Custom Fields")
+        if expanded:
+            fields = list(self.level.custom_fields.items())
+            for i, (field, value) in enumerate(fields):
+                if field in ["bpm", "offset", "swing", "time_signature_num", "time_signature_dec"]:
+                    continue
+                name_changed, name_value = imgui.input_text(f"Name##{i}", field, 256)
+                if name_changed and name_value not in self.level.custom_fields:
+                    fields[i] = (name_value, fields[i][1])
+                imgui.same_line()
+                if imgui.button("-##del-field", 26, 26):
+                    del fields[i]
+                imgui.indent()
+                changed, value, value_type, arr_type = self.display_variable([i], *value)
+                if changed:
+                    fields[i] = (field, (value, value_type, arr_type))
+                imgui.unindent()
+            changed, value = imgui.input_text("Add##add-field", self.adding_field, 256)
+            if changed:
+                self.adding_field = value
+            imgui.same_line()
+            if imgui.button("+##add-field", 26, 26) and self.adding_field != "":
+                fields.append((self.adding_field, (0, 1, 1)))
+                self.adding_field = ""
+            self.level.custom_fields = dict(fields)
 
     def display_vuln(self):
         """Display the edit menu for Vulnus levels."""
@@ -234,12 +379,12 @@ class Editor:
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed or fixed_name:
             self.level.name = split_name[0] + " - " + value
-        changed, value = imgui.input_text("Mappers", self.level.author, 256,
+        changed, value = imgui.input_text("Mappers", ", ".join(self.level.authors), 256,
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if imgui.is_item_hovered():
             imgui.set_tooltip("Separate with spaces and commas.\n(e.g. \"Alice, Bob, Craig\")")
         if changed:
-            self.level.author = value
+            self.level.authors = value.split(", ")
         imgui.separator()
         clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
         if clicked:
@@ -409,7 +554,7 @@ class Editor:
         event = sdl2.SDL_Event()
 
         # Initialize variables
-        RPC.connect()
+        # RPC.connect()
         start_time = time.time()
         running = True
         old_audio = None
@@ -506,30 +651,30 @@ class Editor:
                     name_id = 0
                     if (time.time() - time_since_last_change) <= 600:  # Did they leave the app open?
                         sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
-                    RPC.update(state="Idling", small_image="icon", start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    # RPC.update(state="Idling", small_image="icon", start=start_time,
+                    #           buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif self.filename is None:
                 if name_id != 1 or (time.time() % 15 < 0.1):  # Does the level exist as a file?
                     name_id = 1
                     sdl2.SDL_SetWindowTitle(window, "*Unnamed - SSPy".encode("utf-8"))
-                    RPC.update(details="Editing an unnamed level", small_image="icon",
-                               state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                               start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    # RPC.update(details="Editing an unnamed level", small_image="icon",
+                    #           state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                    #           start=start_time,
+                    #           buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif self.changed_since_save:
                 if name_id != 2 or (time.time() % 15 < 0.1):  # Has the level been saved?
                     name_id = 2
                     sdl2.SDL_SetWindowTitle(window, f"*{self.filename} - SSPy".encode("utf-8"))
-                    RPC.update(details=f"Editing {self.filename}", small_image="icon",
-                               state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                               start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    # RPC.update(details=f"Editing {self.filename}", small_image="icon",
+                    #           state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                    #           start=start_time,
+                    #           buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif name_id != 3 or (time.time() % 15 < 0.1):
                 name_id = 3
                 sdl2.SDL_SetWindowTitle(window, f"{self.filename} - SSPy".encode("utf-8"))
-                RPC.update(details=f"Editing {self.filename}", small_image="icon",
-                           state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                           start=start_time, buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                # RPC.update(details=f"Editing {self.filename}", small_image="icon",
+                #           state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                #           start=start_time, buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             with imgui.font(font):
                 while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
                     # Handle quitting the app
@@ -623,7 +768,7 @@ class Editor:
                                                      list(FORMAT_NAMES))
                         if changed:
                             self.level = FORMATS[value](self.level.name,
-                                                        self.level.author,
+                                                        self.level.authors,
                                                         self.level.notes,
                                                         self.level.cover,
                                                         self.level.audio,
@@ -1104,7 +1249,8 @@ class Editor:
                                         swung_beat = self.adjust_swing(beat)
                                         self.swing = 1 - self.swing
                                         beat_time = (swung_beat * ms_per_beat) + self.offset
-                                        if (end_beat < 250 or on_beat) and (end_beat < 500 or on_measure) and end_beat < 2000:
+                                        if (end_beat < 250 or on_beat) and (
+                                                end_beat < 500 or on_measure) and end_beat < 2000:
                                             progress = beat_time / timeline_width
                                             progress = progress if not math.isnan(progress) else 1
                                             timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - (
@@ -1286,7 +1432,8 @@ class Editor:
                                     else:
                                         cursor_positions = [cursor_spline(self.time - t) for t in
                                                             range(0, 75, 1)]
-                                    self.camera_pos = ((cursor_positions[0][0] - 1) * self.parallax, (cursor_positions[0][1] - 1) * self.parallax)
+                                    self.camera_pos = ((cursor_positions[0][0] - 1) * self.parallax,
+                                                       (cursor_positions[0][1] - 1) * self.parallax)
 
                                     def position(pos):
                                         return self.note_pos_to_abs_pos(pos, box, 1)
@@ -1362,7 +1509,7 @@ class Editor:
             self.time = min(max(self.time, 0),
                             2 ** 31 - 1)  # NOTE: This needs to be 2**31-1 no matter if it's on a 32-bit or 64-bit computer, so no sys.maxsize here
             was_playing = self.playing
-
+            self.unique_label_counter = 0
             if not self.vsync:
                 dt = (time.perf_counter_ns() - dt) / 1000000000
                 time.sleep(max((1 / self.fps_cap) - dt, 0))
