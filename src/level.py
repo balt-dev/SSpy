@@ -156,7 +156,7 @@ class SSPMLevel(Level):
                  custom_fields={
                      "bpm": (120, 6),
                      "time_signature_num": (4, 2),
-                     "time_signature_dec": (4, 2),
+                     "time_signature_den": (4, 2),
                      "offset": (0, 3),
                      "swing": (0.5, 6)
                  },
@@ -269,7 +269,7 @@ class SSPMLevel(Level):
                     # Each marker is a pseudo-struct
                     marker_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
                     marker_types[marker_id] = []
-                    assert i != 1 or marker_id == "ssp_note", "Error while loading SSPMv2: First defined marker wasn't a note!"
+                    assert i != 0 or marker_id == "ssp_note", "Error while loading SSPMv2: First defined marker wasn't a note!"
                     for _ in range(ord(f.read(1))):
                         marker_types[marker_id].append(ord(f.read(1)))
                     f.read(1)
