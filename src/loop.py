@@ -225,7 +225,7 @@ class Editor:
                 if imgui.button("-", 26, 26):
                     del types[i]
                     any_changed = True
-        if not readonly and imgui.button("Add Type"):
+        if not readonly and imgui.button(f"Add Type##{elabel}"):
             types.append(1)
             any_changed = True
         imgui.unindent()
@@ -750,9 +750,6 @@ class Editor:
                     if event.type == sdl2.SDL_MOUSEWHEEL and level_was_active and not self.playing:
                         self.time_scroll(event.wheel.y, keys, ms_per_beat)
                     impl.process_event(event)
-                if (keys[sdl2.SDL_SCANCODE_LEFT] or keys[sdl2.SDL_SCANCODE_RIGHT]) and not \
-                        (old_keys[sdl2.SDL_SCANCODE_LEFT] or old_keys[sdl2.SDL_SCANCODE_RIGHT]):
-                    self.time_scroll((2 * keys[sdl2.SDL_SCANCODE_RIGHT]) - 1, keys, ms_per_beat)
                 self.menu_choice = None
                 # Handle file keybinds
                 if keys[sdl2.SDL_SCANCODE_LCTRL] or keys[sdl2.SDL_SCANCODE_RCTRL]:
@@ -1146,16 +1143,46 @@ class Editor:
                             imgui.same_line()
                             if imgui.button("Add Here"):
                                 self.level.markers.append(dict(time=self.time, m_type=marker_add_index + 1,
-                                                               fields=[VAR_DEFAULTS[var_type] for var_type in
-                                                                       tuple(self.level.marker_types.values())[marker_add_index + 1]]))
-                            for i, marker in self.displayed_markers:
+                                                               fields=[VAR_DEFAULTS[var_type - 1] for var_type in
+                                                                       tuple(self.level.marker_types.values())[
+                                                                           marker_add_index + 1]]))
+                            imgui.separator()
+                            for e, (i, marker) in enumerate(self.displayed_markers):
                                 changed, value = imgui.combo(f"##edit-marker-{i}", marker["m_type"] - 1,
                                                              [*self.level.marker_types][1:])
                                 if changed:
                                     self.level.markers[i] = dict(time=self.time, m_type=value + 1,
                                                                  fields=[VAR_DEFAULTS[var_type] for var_type in
-                                                                         tuple(self.level.marker_types.values())[value + 1]])
-
+                                                                         tuple(self.level.marker_types.values())[
+                                                                             value + 1]])
+                                imgui.same_line()
+                                if imgui.button(f"-##remove-marker-{i}", 26, 26):
+                                    del self.level.markers[i]
+                                imgui.indent()
+                                try:
+                                    var_types = tuple(self.level.marker_types.values())[marker["m_type"]]
+                                    assert len(marker["fields"]) == len(var_types)
+                                    any_changed = False
+                                    for j, field in enumerate(marker["fields"]):
+                                        changed, value, *_ = self.display_variable([i, j], field, var_types[j], _from_array=True)
+                                        if changed:
+                                            any_changed = True
+                                            marker["fields"][j] = value
+                                    if any_changed:
+                                        self.level.markers[i] = marker
+                                        self.displayed_markers[e] = marker
+                                except (TypeError, AssertionError):
+                                    imgui.text_colored(f"! This marker type has changed, making this marker invalid.{traceback.format_exc()}", 1, 0.25, 0.25)
+                                    if imgui.button(f"Reset##reset-marker-{i}"):
+                                        marker = dict(time=self.time, m_type=marker["m_type"],
+                                                      fields=[VAR_DEFAULTS[var_type - 1] for var_type in
+                                                              tuple(self.level.marker_types.values())[
+                                                          marker["m_type"]]])
+                                        print(marker, self.level.markers[i])
+                                        self.level.markers[i] = marker
+                                        self.displayed_markers[e] = marker
+                                        print(self.level.markers[i])
+                                imgui.unindent()
                             imgui.end()
                     else:
                         edit_markers_window_open = False
@@ -1236,6 +1263,9 @@ class Editor:
                         timeline_rects = []
                         if imgui.begin_child("nodrag", 0, 0, False, ):
                             level_was_active = imgui.is_window_focused()
+                            if level_was_active and (keys[sdl2.SDL_SCANCODE_LEFT] or keys[sdl2.SDL_SCANCODE_RIGHT]) and not \
+                                    (old_keys[sdl2.SDL_SCANCODE_LEFT] or old_keys[sdl2.SDL_SCANCODE_RIGHT]):
+                                self.time_scroll((2 * keys[sdl2.SDL_SCANCODE_RIGHT]) - 1, keys, ms_per_beat)
                             draw_list = imgui.get_window_draw_list()
                             if not dragging_timeline:
                                 timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
