@@ -1172,7 +1172,7 @@ class Editor:
                                         self.level.markers[i] = marker
                                         self.displayed_markers[e] = marker
                                 except (TypeError, AssertionError):
-                                    imgui.text_colored(f"! This marker type has changed, making this marker invalid.{traceback.format_exc()}", 1, 0.25, 0.25)
+                                    imgui.text_colored("! This marker type has changed, making this marker invalid.", 1, 0.25, 0.25)
                                     if imgui.button(f"Reset##reset-marker-{i}"):
                                         marker = dict(time=self.time, m_type=marker["m_type"],
                                                       fields=[VAR_DEFAULTS[var_type - 1] for var_type in
