@@ -380,12 +380,12 @@ class SSPMLevel(Level):
             output.write((mkdef_end - mkdef_ptr).to_bytes(8, "little"))
             output.seek(mkdef_end)
             markr_ptr = output.tell()
-            markers = self.markers
+            markers = self.markers.copy()
             for note in self.notes:
                 for pos in self.notes[note]:
                     markers.append({"time": note, "m_type": 0, "fields": [pos]})
-            for marker in sorted(self.markers, key=lambda x: x["time"]):
-                output.write(marker["time"].to_bytes(4, "little"))
+            for marker in sorted(markers, key=lambda x: x["time"]):
+                output.write(int(marker["time"]).to_bytes(4, "little"))
                 output.write(marker["m_type"].to_bytes(1, "little"))
                 for i, var in enumerate(marker["fields"]):
                     var_type = tuple(self.marker_types.values())[marker["m_type"]][i]
@@ -474,9 +474,10 @@ class VulnusLevel(Level):
             bpm, offset, time_signature, swing) if metadata else None
 
     def save(self, filename, bpm, offset, time_signature, swing):
-        print("Exporting audio...")
-        with open("audio.wav", "wb+") as f:
-            self.audio.export(f, format="wav")
+        if self.audio is not None:
+            print("Exporting audio...")
+            with open("audio.wav", "wb+") as f:
+                self.audio.export(f, format="wav")
         print("Exporting metadata...")
         try:  # Load an existing metadata file
             with open("meta.json", "r") as f:
@@ -494,10 +495,11 @@ class VulnusLevel(Level):
         metadata |= metadata_temp
         with open("meta.json", "w+") as m:
             json.dump(metadata, m)
-        print("Exporting cover...")
-        for path in glob.glob("./cover*"):
-            os.remove(path)
-        self.cover.save("cover.png")
+        if self.cover is not None:
+            print("Exporting cover...")
+            for path in glob.glob("./cover*"):
+                os.remove(path)
+            self.cover.save("cover.png")
         print("Exporting notes...")
         level = {"_notes": [], "_name": self.difficulty}
         for time in self.notes:

@@ -14,7 +14,6 @@ def import_timings(filepath, game) -> list[int]:
             # Fix JSON since ADOFAI doesn't quite get it right all of the time
             file = re.sub(r', *([}\]])', r"\1", file)
             file = re.sub(r'([}\]\"])([ \r\n\t]*[{["])', r"\1,\2", file)
-            print(file)
             level = json.loads(file.encode("utf-8"))
         # Initialize variables
         twirled = False

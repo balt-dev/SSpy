@@ -29,6 +29,11 @@ SCRIPT_DIR = str(Path(__file__).resolve().parent.parent)
 
 FORMATS: tuple = (SSPMLevel, RawDataLevel, VulnusLevel)
 FORMAT_NAMES: tuple = ("SS+ Map", "Raw Data", "Vulnus Map")
+TIMING_GAMES = {
+    "A Dance of Fire and Ice": "*.adofai",
+    "osu!": "*.osu",
+    "Clone Hero": "*.chart"
+}
 FORMAT_EXTS: tuple = ("*.sspm", "*.txt", "*.json")
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}hit.wav").set_sample_width(2)
@@ -450,7 +455,15 @@ class Editor:
         imgui.separator()
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
-            self.menu_choice = "edit.cover"
+            changed, value = self.open_file_dialog(
+                {"PNG Image": "*.png", "JPG Image": "*.jpg", "BMP Image": "*.bmp", "GIF image": "*.gif",
+                 "WEBP Image": "*.webp"})
+            if changed:
+                with Image.open(value) as im:
+                    self.level.cover = im.copy()
+                    self.create_image(self.level.cover, self.COVER_ID)
+                self.changed_since_save = True
+                self.time_since_last_change = time.time()
         if imgui.is_item_hovered():
             imgui.set_tooltip("Click to set a cover.")
         clicked = imgui.button("Remove Cover")
@@ -469,7 +482,7 @@ class Editor:
     def save_file_dialog(self, suffix):
         v = filedialog.asksaveasfilename(title="Save a file",
                                          initialdir=self.current_folder,
-                                         filetypes=suffix)
+                                         filetypes=tuple(suffix.items()))
         return bool(len(v)), v
 
     def keys(self):
@@ -547,6 +560,7 @@ class Editor:
             self.time = 0
             self.playing = False
             self.filename = filename
+            self.timings = np.array((), dtype=np.int64)
             return True
 
     def start(self, window, impl, font, default_font, *_):
@@ -589,13 +603,10 @@ class Editor:
         bulk_delete_end_time = 0
         cursor_spline = None
         name_id = -1
-        timings_game = 0
-        timings_filepath = ""
         timeline_width = 0
         dragging_timeline = False
         ms_per_beat = 0
         edit_markers_window_open = False
-        import_timings_window_open = False
         marker_add_index = 0
         # Load constant textures
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}nocover.png") as im:
@@ -743,7 +754,7 @@ class Editor:
                             except Exception as e:
                                 self.error = e
                         else:
-                            self.menu_choice = "file.saveas"
+                            self.saveas()
                 if imgui.begin_main_menu_bar():
                     if imgui.begin_menu("File"):
                         if imgui.menu_item("New", "ctrl + n")[0]:
@@ -775,11 +786,11 @@ class Editor:
                                 except Exception as e:
                                     self.error = e
                             else:
-                                self.menu_choice = "file.saveas"
+                                self.saveas()
                         if imgui.menu_item("Save As...", "ctrl + shift + s", enabled=self.level is not None)[0]:
                             if self.filename is not None:
                                 self.temp_filename = self.filename
-                            self.menu_choice = "file.saveas"
+                            self.saveas()
                         imgui.separator()
                         if imgui.menu_item("Quit", "alt + f4")[0]:
                             self.playing = False
@@ -817,7 +828,17 @@ class Editor:
                             imgui.text("/!\\ Map has no audio")
                         clicked = imgui.button("Change song")
                         if clicked:
-                            self.menu_choice = "edit.song"
+                            # Load the selected audio
+                            changed, value = self.open_file_dialog(
+                                {"MP3 Audio": "*.mp3", "OGG Audio": "*.ogg", "WAV Audio": "*.wav",
+                                 "FLAC Audio": "*.flac", "OPUS Audio": "*.opus"})
+                            if changed:
+                                try:
+                                    self.level.audio = AudioSegment.from_file(value).set_sample_width(2)
+                                    self.changed_since_save = True
+                                    self.time_since_last_change = time.time()
+                                except pydub.exceptions.CouldntDecodeError:
+                                    self.error = Exception("Audio file couldn't be read! It might be corrupted.")
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Preferences", self.level is not None):
@@ -957,7 +978,19 @@ class Editor:
                         if isinstance(self.level, SSPMLevel) and imgui.button("Edit Markers"):
                             edit_markers_window_open = isinstance(self.level, SSPMLevel)
                         if imgui.button("Import Timings"):
-                            import_timings_window_open = True
+                            changed, value = self.open_file_dialog(TIMING_GAMES)
+                            if changed:
+                                timings_filepath = value
+                                timings_game = tuple(TIMING_GAMES.values()).index("*" + Path(value).suffix)
+                                try:
+                                    self.timings = np.array(import_timings(timings_filepath, timings_game), np.int64)
+                                except Exception as e:
+                                    self.error = e
+                        if self.timings.size > 0:
+                            imgui.indent()
+                            if imgui.button("Clear Timings"):
+                                self.timings = np.array((), dtype=np.int64)
+                            imgui.unindent()
                         changed, value = imgui.checkbox("Playtesting?", self.playtesting)
                         if changed:
                             self.playtesting = value
@@ -990,28 +1023,6 @@ class Editor:
                 # Handle popups
                 if self.menu_choice is not None:
                     imgui.open_popup(self.menu_choice)
-                if imgui.begin_popup("file.saveas"):
-                    i = FORMATS.index(self.level.__class__)
-                    changed, value = self.save_file_dialog({FORMAT_NAMES[i]: FORMAT_EXTS[i]})
-                    if changed:
-                        try:
-                            self.level.save(self.filename, self.bpm, self.offset, self.time_signature, self.swing)
-                            self.changed_since_save = False
-                        except Exception as e:
-                            self.error = e
-                        imgui.close_current_popup()
-                    imgui.end_popup()
-                if imgui.begin_popup("edit.song"):
-                    # Load the selected audio
-                    changed, value = self.open_file_dialog({"MP3 Audio": "*.mp3", "OGG Audio": "*.ogg", "WAV Audio": "*.wav", "FLAC Audio": "*.flac", "OPUS Audio": "*.opus"})
-                    if changed:
-                        try:
-                            self.level.audio = AudioSegment.from_file(value).set_sample_width(2)
-                            self.changed_since_save = True
-                            self.time_since_last_change = time.time()
-                        except pydub.exceptions.CouldntDecodeError:
-                            self.error = Exception("Audio file couldn't be read! It might be corrupted.")
-                    imgui.end_popup()
                 if imgui.begin_popup("quit.ensure"):
                     imgui.text("You have unsaved changes!")
                     imgui.text("Are you sure you want to exit?")
@@ -1133,27 +1144,6 @@ class Editor:
                             imgui.end()
                     else:
                         edit_markers_window_open = False
-                if import_timings_window_open and imgui.begin("Import Timings"):
-                    imgui.text("Import timings from a non-SS game.")
-                    imgui.text("If you have any game you want added, reach out!")
-                    changed, value = imgui.combo("Game", timings_game, [
-                        "A Dance of Fire and Ice (.adofai)",
-                        "osu! (.osu)",
-                        "Clone Hero (.chart)"
-                    ])
-                    if changed:
-                        timings_game = value
-                    changed, value = imgui.input_text("Filepath", timings_filepath, 65536)
-                    if changed:
-                        timings_filepath = value
-                    if os.path.isfile(timings_filepath):
-                        if imgui.button("Open"):
-                            self.timings = np.array(import_timings(timings_filepath, timings_game), np.int64)
-                    else:
-                        imgui.text_colored("Invalid filepath!", 1, 0.5, 0.5)
-                    if imgui.button("Close"):
-                        import_timings_window_open = False
-                    imgui.end()
                 if spline_window_open:
                     imgui.set_next_window_size(0, 0)
                     imgui.set_next_window_position(0, 0, imgui.APPEARING)
@@ -1421,7 +1411,7 @@ class Editor:
                                     progress = progress if not math.isnan(progress) else 1
                                     timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - self.timeline_height,
                                                                        x + int(w * progress) + 1, (y + h) - (self.timeline_height * 0.7)),
-                                                                      0x00ff0080))
+                                                                      0x8000ff00))
                                     self.rects_drawn += 1
                                     if (self.time <= timing < self.time + self.approach_rate):
                                         line_prog = 1 - ((timing - self.time) / self.approach_rate)
@@ -1703,3 +1693,13 @@ class Editor:
                                position[0] + note_size // 2, position[1] + note_size // 2,
                                (int(alpha * max(progress, 0)) << 24) | color, thickness=max((note_size // 8), 0))
             self.rects_drawn += 1
+
+    def saveas(self):
+        i = FORMATS.index(self.level.__class__)
+        changed, value = self.save_file_dialog({FORMAT_NAMES[i]: FORMAT_EXTS[i]})
+        if changed:
+            try:
+                self.level.save(value, self.bpm, self.offset, self.time_signature, self.swing)
+                self.changed_since_save = False
+            except Exception as e:
+                self.error = e
