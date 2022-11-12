@@ -8,3 +8,4 @@ simpleaudio
 pyopengl
 scipy
 pypresence
+chparse

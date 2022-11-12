@@ -19,6 +19,7 @@ from scipy.interpolate import \
     CubicSpline  # NOTE:  god i wish scipy had partial downloads like "scipy[interpolate]" like i don't need all of math to make. a spline
 
 from src.level import *  # this is fine, i know what's there
+from src.timings import import_timings
 
 # Initialize constants
 
@@ -76,14 +77,16 @@ def adjust(x, s): return (((round(((x) / 2) * (s - 1)) / (s - 1)) * 2)) if s != 
 
 class Editor:
     def __init__(self):
+        self.background_size = (0, 0)
         self.times_to_display = None
         self.notes_changed = False
         self.starting_position = None
         self.starting_time = None
         self.GITHUB_ICON_ID = None
         self.COVER_ID = None
-        self.menu_choice = None
         self.NO_COVER = None
+        self.BACKGROUND = None
+        self.menu_choice = None
         self.hitsounds = True
         self.bpm_markers = True
         self.io = None
@@ -106,7 +109,6 @@ class Editor:
         self.time_signature = (4, 4)
         self.beat_divisor = 4
         self.note_snapping = 3, 3
-        self.cover_id = None
         self.draw_notes = True
         self.draw_audio = False
         self.fps_cap = 100
@@ -121,6 +123,7 @@ class Editor:
         self.colors = []
         self.camera_pos = [0, 0]
         self.parallax = 0
+        self.timings = []
         # Read colors from file
         if os.path.exists(f"{SCRIPT_DIR + os.sep}colors.txt"):
             with open(f"{SCRIPT_DIR + os.sep}colors.txt", "r") as f:
@@ -201,7 +204,7 @@ class Editor:
                                                                                                 "_")
             self.changed_since_save = True
         imgui.separator()
-        clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
+        clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
             self.menu_choice = "edit.cover"
         if imgui.is_item_hovered():
@@ -241,7 +244,7 @@ class Editor:
         if changed:
             self.level.author = value
         imgui.separator()
-        clicked = imgui.image_button(self.cover_id, 192, 192, frame_padding=0)
+        clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
             self.menu_choice = "edit.cover"
         if imgui.is_item_hovered():
@@ -423,7 +426,6 @@ class Editor:
         old_mouse = (0, 0, 0, 0, 0)
         old_beat = 0
         tex_ids = GL.glGenTextures(3)  # NOTE: Update this when you add more images
-        self.cover_id = int(tex_ids[0])
         note_offset = None
         old_keys = self.keys()
         cursor_positions = [[0, 0]]
@@ -438,6 +440,8 @@ class Editor:
         bulk_delete_end_time = 0
         cursor_spline = None
         name_id = -1
+        timings_game = 0
+        timings_filepath = ""
         time_since_last_change = time.time()
         timeline_width = 0
         dragging_timeline = False
@@ -448,6 +452,11 @@ class Editor:
             self.COVER_ID = self.create_image(self.NO_COVER, int(tex_ids[0]))
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}github.png") as im:
             self.GITHUB_ICON_ID = self.create_image(im, int(tex_ids[1]))
+        background_glob = glob.glob(f"{SCRIPT_DIR + os.sep}background.*")
+        if len(background_glob):
+            with Image.open(background_glob[0]) as im:
+                self.BACKGROUND = self.create_image(im, int(tex_ids[2]))
+                self.background_size = im.size
         # Handle opening a file with the program
         if len(sys.argv) > 1:
             self.load_file(sys.argv[1])
@@ -784,6 +793,8 @@ class Editor:
                             spline_window_open = True
                         if imgui.button("Bulk Delete"):
                             bulk_delete_window_open = True
+                        if imgui.button("Import Timings"):
+                            import_timings_window_open = True
                         changed, value = imgui.checkbox("Playtesting?", self.playtesting)
                         if changed:
                             self.playtesting = value
@@ -916,6 +927,23 @@ class Editor:
                         self.changed_since_save = True
                         time_since_last_change = time.time()
                     imgui.end()
+                if import_timings_window_open and imgui.begin("Import Timings"):
+                    imgui.text("Import timings from a non-SS game.")
+                    imgui.text("If you have any game you want added, reach out!")
+                    changed, value = imgui.combo("Game", timings_game, (
+                        "A Dance of Fire and Ice (.adofai)",
+                        "osu! (.osu)"
+                    ))
+                    if changed:
+                        timings_game = value
+                    changed, value = imgui.input_text("Filepath", timings_filepath, 65536)
+                    if changed:
+                        timings_game = value
+                    if os.path.isfile(timings_filepath):
+                        if imgui.button("Open"):
+                            self.timings = import_timings(timings_filepath, timings_game)
+                    else:
+                        imgui.text_colored("Invalid filepath!", 1, 0.5, 0.5)
                 if spline_window_open:
                     imgui.set_next_window_size(0, 0)
                     imgui.set_next_window_position(0, 0, imgui.APPEARING)
@@ -997,16 +1025,27 @@ class Editor:
                             if not dragging_timeline:
                                 timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
                             # Draw the main UI background
-                            square_side = min(w - self.timeline_height, h - self.timeline_height)
-                            draw_list.add_rect_filled(x, y, x + w, y + h, 0xff000000)
+                            square_side = min(w, h)
+                            if self.BACKGROUND is None:
+                                draw_list.add_rect_filled(x, y, x + w, y + h, 0xff000000)
+                            else:
+                                # Adjust width and height for UVs
+                                adjusted_w = w / self.background_size[0]
+                                adjusted_h = h / self.background_size[1]
+                                normalized_w = adjusted_w / max(adjusted_w, adjusted_h)
+                                normalized_h = adjusted_h / max(adjusted_w, adjusted_h)
+                                draw_list.add_image(self.BACKGROUND, (x, y), (x + w, y + h),
+                                                    (0.5 - (normalized_w / 2), 0.5 - (normalized_h / 2)),
+                                                    (0.5 + (normalized_w / 2), 0.5 + (normalized_h / 2)))
                             adjusted_x = (((x + w) / 2) - (square_side / 2))
-                            box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
+                            adjusted_y = (((y + h) / 2) - (square_side / 2))
+                            box = (adjusted_x, adjusted_y, adjusted_x + square_side, adjusted_y + square_side)
                             timeline_rects.append(
                                 DelayedRect((x, (y + h) - self.timeline_height, x + w, (y + h)), 0x80404040))
                             self.rects_drawn += 3
                             note_pos = [(((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (
                                 self.vis_map_size / 2) + 1,
-                                (((mouse_pos[1] - (y)) / (square_side)) * self.vis_map_size) - (
+                                (((mouse_pos[1] - (adjusted_y)) / (square_side)) * self.vis_map_size) - (
                                 self.vis_map_size / 2) + 1]
                             cursor_pos = (
                                 ((note_pos[0] - 1) * self.sensitivity) + 1, ((note_pos[1] - 1) * self.sensitivity) + 1)
@@ -1115,7 +1154,6 @@ class Editor:
                                             self.rects_drawn += 1
                                         if (self.time <= beat_time < self.time + self.approach_rate):
                                             line_prog = 1 - ((beat_time - self.time) / self.approach_rate)
-                                            box = (adjusted_x, y, adjusted_x + square_side, y + square_side)
                                             # Draw beat marker in note space
                                             draw_list.add_rect(
                                                 *self.note_pos_to_abs_pos(
@@ -1124,8 +1162,8 @@ class Editor:
                                                 *self.note_pos_to_abs_pos(
                                                     (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
                                                     box, line_prog),
-                                                0xFF000000 | int(0xFF * max(0, line_prog) / (
-                                                    1 if on_measure else 2 if on_beat else 6)),
+                                                0xFF | (int(0xFF * max(0, line_prog) / (
+                                                    1 if on_measure else 2 if on_beat else 6))) << 24,
                                                 thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
                                             )
                                             self.rects_drawn += 1
@@ -1389,11 +1427,8 @@ class Editor:
             spacing = ((box[2] - box[0]) / self.vis_map_size)
             visual_scale = (spacing / 1.25) * self.perspective_scale(progress)
             note_size = visual_scale * size
-            color_part = int(0xFF * progress)
             position = self.note_pos_to_abs_pos(note_pos, box, progress)
             draw_list.add_rect(position[0] - note_size // 2, position[1] - note_size // 2,
                                position[0] + note_size // 2, position[1] + note_size // 2,
-                               max((alpha << 24) | (int(color_part * (((color & 0xFF0000) >> 16) / 0xFF)) << 16) |
-                                   (int((color_part * (((color & 0xFF00) >> 8)) / 0xFF)) << 8) |
-                                   int((color_part * (color & 0xFF)) / 0xFF), 0), thickness=max((note_size // 8), 0))
+                               (int(alpha * max(progress, 0)) << 24) | color, thickness=max((note_size // 8), 0))
             self.rects_drawn += 1
