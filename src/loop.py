@@ -1,7 +1,8 @@
+import base64
+import binascii
 import ctypes
-import glob
+import http.client
 import math
-import os
 import sys
 import time
 import traceback
@@ -32,7 +33,34 @@ HITSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}hit.wav")
 MISSSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}miss.wav").set_sample_width(2)
 METRONOME_M = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}metronome_measure.wav").set_sample_width(2)
 METRONOME_B = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}metronome_beat.wav").set_sample_width(2)
-RPC = Presence(1032430090505703486)
+VAR_TYPES = ["8-bit Unsigned Integer",
+             "16-bit Unsigned Integer",
+             "32-bit Unsigned Integer",
+             "64-bit Unsigned Integer",
+             "Float",
+             "Double",
+             "Position",
+             "Short Bytes",
+             "Short String",
+             "Long Bytes",
+             "Long String",
+             "Array"]
+VAR_DEFAULTS = [0, 0, 0, 0, 0.0, 0.0, (0.0, 0.0), b"", "", b"", "", [[0, 1, 1]]]
+
+
+class DummyRPC:
+    """
+    For when the user doesn't have internet.
+    """
+
+    def __init__(self):
+        pass
+
+    def connect(self):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
 
 
 class DelayedRect:
@@ -77,6 +105,9 @@ def adjust(x, s): return (((round(((x) / 2) * (s - 1)) / (s - 1)) * 2)) if s != 
 
 class Editor:
     def __init__(self):
+        self.displayed_markers = []
+        self.adding_marker_type = ""
+        self.adding_field = ""
         self.background_size = (0, 0)
         self.times_to_display = None
         self.notes_changed = False
@@ -146,6 +177,9 @@ class Editor:
         self.error = None
         self.playtesting = False
         self.sensitivity = 2.0
+        self.unique_label_counter = 0
+        self.RPC = Presence(1032430090505703486)
+        self.displayed_markers = []
 
     def speed_change(self, sound, speed=1.0):
         if speed < 0:
@@ -171,6 +205,109 @@ class Editor:
         else:
             return (beat - b) + (((2 * s) / (2 - 2 * s)) * (b - 2 * s) + 2 - 2 * s)
 
+    def display_marker_type(self, index, name, types, readonly=False):
+        any_changed = False
+        if not isinstance(types, list):
+            types = list(types)
+        elabel = '-'.join([str(n) for n in index])
+        if readonly:
+            imgui.push_style_color(imgui.COLOR_TEXT, 1, 1, 1, 0.7)
+        changed, value = imgui.input_text(f"Name##{elabel}", name, 256, imgui.INPUT_TEXT_READ_ONLY if readonly else 0)
+        if changed and not readonly:
+            any_changed = True
+            name = value
+        imgui.indent()
+        for i, m_type in enumerate(types):
+            changed, value = imgui.combo(f"Type##{i}-{elabel}", m_type - 1, VAR_TYPES[:-1]) if not readonly else \
+                imgui.input_text(f"Type##{i}-{elabel}", VAR_TYPES[m_type - 1], 128, imgui.INPUT_TEXT_READ_ONLY)
+            if changed and not readonly:
+                any_changed = True
+                types[i] = value + 1
+            if not readonly:
+                imgui.same_line()
+                if imgui.button("-", 26, 26):
+                    del types[i]
+                    any_changed = True
+        if not readonly and imgui.button(f"Add Type##{elabel}"):
+            types.append(1)
+            any_changed = True
+        imgui.unindent()
+        if readonly:
+            imgui.pop_style_color()
+
+        return any_changed, name, types
+
+    def display_variable(self, index, var, var_type, arr_type=None, _from_array=False):
+        elabel = '-'.join([str(n) for n in index])
+        value = var
+        if not _from_array:
+            changed, value = imgui.combo(f"Type##{elabel}", var_type - 1, VAR_TYPES)
+            if changed:
+                return (True, None, value + 1, arr_type)
+        if var is None:
+            var = VAR_DEFAULTS[var_type - 1]
+        if var_type in range(1, 5):
+            changed, value = imgui.input_text(f"Value##int-{elabel}", str(var), 256,
+                                              flags=imgui.INPUT_TEXT_CHARS_DECIMAL)  # imgui only goes up to 2**32
+            try:
+                value = int(value)
+            except ValueError:
+                value = var
+            value = value % (16 ** (2 ** var_type))
+        elif var_type in [5, 6]:
+            changed, value = imgui.input_double(f"Value##double-{elabel}", var, 0, format="%.5f")
+        elif var_type == 7:
+            changed, value = imgui.input_float2(f"Value##float2-{elabel}", *var, "%.2f")
+        elif var_type in range(8, 12):
+            if var_type > 10:
+                f = imgui.input_text_multiline
+                l = 65536
+            else:
+                f = imgui.input_text
+                l = 256
+            if not var_type % 2:
+                l = math.ceil(l * 1.33334)
+                v = base64.b64encode(var).decode("utf-8")
+            else:
+                v = var
+            changed, value = f(f"Value##{elabel}", v, l)
+            if changed and not var_type % 2:
+                try:
+                    value = base64.b64decode(value)
+                except binascii.Error:
+                    changed = False
+        else:
+            if arr_type is None:
+                arr_type = 1
+            changed, arr_value = imgui.combo("Array Type", arr_type - 1, VAR_TYPES[:-1])
+            if changed:
+                value = [[None, 0, 0] for _ in range(len(var))]  # * len(var) doesn't work
+                var_type = var_type
+                arr_type = arr_value + 1
+            else:
+                imgui.indent()
+                for i, val in enumerate(var):
+                    vl, vr_t, ar_t = val
+                    vr_t = arr_type
+                    c, v, v_t, a_t = self.display_variable([*index, i], vl, vr_t, ar_t, _from_array=True)
+                    if c:
+                        var[i][0] = v
+                        var[i][1] = v_t
+                        var[i][2] = a_t
+                        changed = True
+                        value = var
+                    imgui.same_line()
+                    if imgui.button(f"-##{elabel}-del-arr", 26, 26):
+                        del var[i]
+                        changed = True
+                        value = var
+                if imgui.button(f"+##{elabel}-add-arr", 26, 26):
+                    var.append([None, var_type, arr_type])
+                    changed = True
+                    value = var
+                imgui.unindent()
+        return changed, value, var_type, arr_type
+
     def display_sspm(self):
         """Display the edit menu for SSPM levels."""
         # Difficulty picker
@@ -190,18 +327,20 @@ class Editor:
         if changed:
             self.level.id = value
             self.changed_since_save = True
-        changed_a, value = imgui.input_text("Name", self.level.name, 128,
-                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-        if changed_a:
+        changed, value = imgui.input_text("Map Name", self.level.name, 128,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
             self.level.name = value
-        changed_b, value = imgui.input_text("Mapper", self.level.author, 64,
-                                            imgui.INPUT_TEXT_AUTO_SELECT_ALL)
-        if changed_b:
-            self.level.author = value
-        # Change the level ID if needed
-        if changed_a or changed_b:
-            self.level.id = (self.level.author.lower() + " " + self.level.name.lower()).replace(" ",
-                                                                                                "_")
+            self.changed_since_save = True
+        changed, value = imgui.input_text("Song Name", self.level.song_name, 128,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
+            self.level.song_name = value
+            self.changed_since_save = True
+        changed, value = imgui.input_text("Mappers", ", ".join(self.level.authors), 256,
+                                          imgui.INPUT_TEXT_AUTO_SELECT_ALL)
+        if changed:
+            self.level.authors = value.split(", ")
             self.changed_since_save = True
         imgui.separator()
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
@@ -214,6 +353,60 @@ class Editor:
             self.create_image(self.NO_COVER, self.COVER_ID)  # Remove the cover
             self.level.cover = None
             self.changed_since_save = True
+        imgui.separator()
+        # custom_fields=fields, marker_types=marker_types, markers=markers,
+        #                            modchart=modchart, rating=rating
+        changed, value = imgui.checkbox("Modchart?", self.level.modchart)
+        if changed:
+            self.level.modchart = value
+        changed, value = imgui.input_int("Rating", self.level.rating, 0)
+        if changed:
+            self.level.rating = value
+        expanded, visible = imgui.collapsing_header("Custom Fields")
+        if expanded:
+            fields = list(self.level.custom_fields.items())
+            for i, (field, value) in enumerate(fields):
+                if field in ["bpm", "offset", "swing", "time_signature_num", "time_signature_den"]:
+                    continue
+                name_changed, name_value = imgui.input_text(f"Name##{i}", field, 256)
+                if name_changed and name_value not in self.level.custom_fields:
+                    fields[i] = (name_value, fields[i][1])
+                imgui.same_line()
+                if imgui.button("-##del-field", 26, 26):
+                    del fields[i]
+                imgui.indent()
+                changed, value, value_type, arr_type = self.display_variable([i], *value)
+                if changed:
+                    fields[i] = (field, (value, value_type, arr_type))
+                imgui.unindent()
+            changed, value = imgui.input_text("Add##add-field", self.adding_field, 256)
+            if changed:
+                self.adding_field = value
+            imgui.same_line()
+            if imgui.button("+##add-field", 26, 26) and self.adding_field != "":
+                fields.append((self.adding_field, (0, 1, 1)))
+                self.adding_field = ""
+            self.level.custom_fields = dict(fields)
+        expanded, visible = imgui.collapsing_header("Marker Types")
+        if expanded:
+            m_types = list(self.level.marker_types.items())
+            any_changed = False
+            for i, (name, types) in enumerate(m_types):
+                changed, new_name, new_types = self.display_marker_type([i], name, types, name == "ssp_note")
+                if changed:
+                    any_changed = True
+                    m_types[i] = [new_name, new_types]
+            changed, value = imgui.input_text("Add##add-marker-type", self.adding_marker_type, 256)
+            if changed:
+                any_changed = True
+                self.adding_marker_type = value
+            imgui.same_line()
+            if len(m_types) < 256 and imgui.button("+##add-marker-type", 26, 26) and self.adding_marker_type != "":
+                any_changed = True
+                m_types.append([self.adding_marker_type, []])
+                self.adding_marker_type = ""
+            if any_changed:
+                self.level.marker_types = {"ssp_note": [7]} | {k: v for k, v in m_types if k != "ssp_note"}
 
     def display_vuln(self):
         """Display the edit menu for Vulnus levels."""
@@ -237,12 +430,12 @@ class Editor:
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if changed or fixed_name:
             self.level.name = split_name[0] + " - " + value
-        changed, value = imgui.input_text("Mappers", self.level.author, 256,
+        changed, value = imgui.input_text("Mappers", ", ".join(self.level.authors), 256,
                                           imgui.INPUT_TEXT_AUTO_SELECT_ALL)
         if imgui.is_item_hovered():
             imgui.set_tooltip("Separate with spaces and commas.\n(e.g. \"Alice, Bob, Craig\")")
         if changed:
-            self.level.author = value
+            self.level.authors = value.split(", ")
         imgui.separator()
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
@@ -382,6 +575,7 @@ class Editor:
             level_class = VulnusLevel
         else:
             self.error = AssertionError("Invalid level type!")
+            return False
         # Read the level from the file and load it
         try:
             self.level, metadata = level_class.load(filename)
@@ -412,7 +606,13 @@ class Editor:
         event = sdl2.SDL_Event()
 
         # Initialize variables
-        RPC.connect()
+        # Only connect if connected to the internet
+        conn = http.client.HTTPSConnection("1.1.1.1", timeout=5)
+        try:
+            conn.request("HEAD", "/")
+            self.RPC.connect()
+        except:
+            self.RPC = DummyRPC()
         start_time = time.time()
         running = True
         old_audio = None
@@ -446,6 +646,8 @@ class Editor:
         timeline_width = 0
         dragging_timeline = False
         ms_per_beat = 0
+        edit_markers_window_open = False
+        marker_add_index = 0
         # Load constant textures
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}nocover.png") as im:
             self.NO_COVER = im.copy()
@@ -509,36 +711,42 @@ class Editor:
                 self.playback = play_at_position(self.speed_change(self.level.audio + self.volume, self.audio_speed),
                                                  ((self.time) / 1000) / self.audio_speed)
             # Set the window name
-            # FIXME: The RPC code is kind of spaghetti.
-            if self.level is None or (time.time() - time_since_last_change) > 600:  # Is a level open?
+            # FIXME: The self.RPC code is kind of spaghetti.
+            if sys.gettrace() is not None:
+                if name_id != -1 or (time.time() % 15 < 0.1):
+                    name_id = -1
+                self.RPC.update(state="Developing", small_image="icon", start=start_time,
+                                buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+            elif self.level is None or (time.time() - time_since_last_change) > 600:  # Is a level open?
                 if name_id != 0:
                     name_id = 0
                     if (time.time() - time_since_last_change) <= 600:  # Did they leave the app open?
                         sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
-                    RPC.update(state="Idling", small_image="icon", start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    self.RPC.update(state="Idling", small_image="icon", start=start_time,
+                                    buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif self.filename is None:
                 if name_id != 1 or (time.time() % 15 < 0.1):  # Does the level exist as a file?
                     name_id = 1
                     sdl2.SDL_SetWindowTitle(window, "*Unnamed - SSPy".encode("utf-8"))
-                    RPC.update(details="Editing an unnamed level", small_image="icon",
-                               state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                               start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    self.RPC.update(details="Editing an unnamed level", small_image="icon",
+                                    state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                                    start=start_time,
+                                    buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif self.changed_since_save:
                 if name_id != 2 or (time.time() % 15 < 0.1):  # Has the level been saved?
                     name_id = 2
                     sdl2.SDL_SetWindowTitle(window, f"*{self.filename} - SSPy".encode("utf-8"))
-                    RPC.update(details=f"Editing {self.filename}", small_image="icon",
-                               state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                               start=start_time,
-                               buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                    self.RPC.update(details=f"Editing {self.filename}", small_image="icon",
+                                    state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                                    start=start_time,
+                                    buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             elif name_id != 3 or (time.time() % 15 < 0.1):
                 name_id = 3
                 sdl2.SDL_SetWindowTitle(window, f"{self.filename} - SSPy".encode("utf-8"))
-                RPC.update(details=f"Editing {self.filename}", small_image="icon",
-                           state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                           start=start_time, buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                self.RPC.update(details=f"Editing {self.filename}", small_image="icon",
+                                state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                                start=start_time,
+                                buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             with imgui.font(font):
                 while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
                     # Handle quitting the app
@@ -632,7 +840,7 @@ class Editor:
                                                      list(FORMAT_NAMES))
                         if changed:
                             self.level = FORMATS[value](self.level.name,
-                                                        self.level.author,
+                                                        self.level.authors,
                                                         self.level.notes,
                                                         self.level.cover,
                                                         self.level.audio,
@@ -793,6 +1001,8 @@ class Editor:
                             spline_window_open = True
                         if imgui.button("Bulk Delete"):
                             bulk_delete_window_open = True
+                        if isinstance(self.level, SSPMLevel) and imgui.button("Edit Markers"):
+                            edit_markers_window_open = isinstance(self.level, SSPMLevel)
                         if imgui.button("Import Timings"):
                             import_timings_window_open = True
                         changed, value = imgui.checkbox("Playtesting?", self.playtesting)
@@ -809,6 +1019,11 @@ class Editor:
                     if imgui.begin_menu("Info", self.level is not None):
                         imgui.text(f"Notes: {len(self.level.notes)}")
                         imgui.text(f"Length: {self.level.get_end() / 1000}")
+                        imgui.end_menu()
+                    if imgui.begin_menu("Help"):
+                        imgui.text("Mouse wheel or left/right arrows to move your place on the timeline")
+                        imgui.text("Space to play/pause the level")
+                        imgui.text("Left click to place a note, right click to delete")
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(self.GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
@@ -927,6 +1142,61 @@ class Editor:
                         self.changed_since_save = True
                         time_since_last_change = time.time()
                     imgui.end()
+                if edit_markers_window_open:
+                    if isinstance(self.level, SSPMLevel) and len(self.level.marker_types) > 1:
+                        imgui.set_next_window_size(0, 0)
+                        if imgui.begin("Markers"):
+                            imgui.text("Edit markers within the level.")
+                            changed, value = imgui.combo("##add-marker", marker_add_index,
+                                                         [*self.level.marker_types][1:])
+                            if changed:
+                                marker_add_index = value
+                            imgui.same_line()
+                            if imgui.button("Add Here"):
+                                self.level.markers.append(dict(time=self.time, m_type=marker_add_index + 1,
+                                                               fields=[VAR_DEFAULTS[var_type - 1] for var_type in
+                                                                       tuple(self.level.marker_types.values())[
+                                                                           marker_add_index + 1]]))
+                            imgui.separator()
+                            for e, (i, marker) in enumerate(self.displayed_markers):
+                                changed, value = imgui.combo(f"##edit-marker-{i}", marker["m_type"] - 1,
+                                                             [*self.level.marker_types][1:])
+                                if changed:
+                                    self.level.markers[i] = dict(time=self.time, m_type=value + 1,
+                                                                 fields=[VAR_DEFAULTS[var_type] for var_type in
+                                                                         tuple(self.level.marker_types.values())[
+                                                                             value + 1]])
+                                imgui.same_line()
+                                if imgui.button(f"-##remove-marker-{i}", 26, 26):
+                                    del self.level.markers[i]
+                                imgui.indent()
+                                try:
+                                    var_types = tuple(self.level.marker_types.values())[marker["m_type"]]
+                                    assert len(marker["fields"]) == len(var_types)
+                                    any_changed = False
+                                    for j, field in enumerate(marker["fields"]):
+                                        changed, value, *_ = self.display_variable([i, j], field, var_types[j], _from_array=True)
+                                        if changed:
+                                            any_changed = True
+                                            marker["fields"][j] = value
+                                    if any_changed:
+                                        self.level.markers[i] = marker
+                                        self.displayed_markers[e] = marker
+                                except (TypeError, AssertionError):
+                                    imgui.text_colored("! This marker type has changed, making this marker invalid.", 1, 0.25, 0.25)
+                                    if imgui.button(f"Reset##reset-marker-{i}"):
+                                        marker = dict(time=self.time, m_type=marker["m_type"],
+                                                      fields=[VAR_DEFAULTS[var_type - 1] for var_type in
+                                                              tuple(self.level.marker_types.values())[
+                                                          marker["m_type"]]])
+                                        print(marker, self.level.markers[i])
+                                        self.level.markers[i] = marker
+                                        self.displayed_markers[e] = marker
+                                        print(self.level.markers[i])
+                                imgui.unindent()
+                            imgui.end()
+                    else:
+                        edit_markers_window_open = False
                 if import_timings_window_open and imgui.begin("Import Timings"):
                     imgui.text("Import timings from a non-SS game.")
                     imgui.text("If you have any game you want added, reach out!")
@@ -1021,6 +1291,9 @@ class Editor:
                         timeline_rects = []
                         if imgui.begin_child("nodrag", 0, 0, False, ):
                             level_was_active = imgui.is_window_focused()
+                            if level_was_active and (keys[sdl2.SDL_SCANCODE_LEFT] or keys[sdl2.SDL_SCANCODE_RIGHT]) and not \
+                                    (old_keys[sdl2.SDL_SCANCODE_LEFT] or old_keys[sdl2.SDL_SCANCODE_RIGHT]):
+                                self.time_scroll((2 * keys[sdl2.SDL_SCANCODE_RIGHT]) - 1, keys, ms_per_beat)
                             draw_list = imgui.get_window_draw_list()
                             if not dragging_timeline:
                                 timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
@@ -1131,6 +1404,40 @@ class Editor:
                                         else:
                                             _play_with_simpleaudio(METRONOME_B)
                                 old_beat = current_beat
+                                # Draw markers
+                                if isinstance(self.level, SSPMLevel):
+                                    old_time = -1
+                                    offset = 0
+                                    self.displayed_markers = []
+                                    for i, marker in enumerate(self.level.markers):  # XXX: this isn't very good
+                                        if marker["time"] == old_time:
+                                            offset += 1
+                                        else:
+                                            offset = 0
+                                            old_time = marker["time"]
+                                        if self.time <= marker["time"] < (self.time + self.approach_rate):
+                                            line_prog = 1 - ((marker["time"] - self.time) / self.approach_rate)
+                                            draw_list.add_line(
+                                                *self.note_pos_to_abs_pos(
+                                                    (self.vis_map_size / 2 + 1,
+                                                     (self.vis_map_size / 2 + 1) + (0.05 * offset)),
+                                                    box, line_prog),
+                                                *self.note_pos_to_abs_pos(
+                                                    (self.vis_map_size / -2 + 1,
+                                                     (self.vis_map_size / 2 + 1) + (0.05 * offset)),
+                                                    box, line_prog),
+                                                0xFFFFFF | (int(0xFF * max(0, line_prog)) << 24),
+                                                thickness=4 * line_prog
+                                            )
+                                        progress = marker["time"] / timeline_width
+                                        timeline_rects.append(
+                                            DelayedRect((x + int(w * progress), (y + h) - self.timeline_height * 0.2,
+                                                         x + int(w * progress) + 1,
+                                                         (y + h) - self.timeline_height * 0.4),
+                                                        0x00ff00ff))
+                                        if self.time == marker["time"]:
+                                            self.displayed_markers.append((i, marker))
+                                        self.rects_drawn += 1
 
                                 if self.bpm_markers:
                                     # Draw beat markers on timeline
@@ -1143,7 +1450,8 @@ class Editor:
                                         swung_beat = self.adjust_swing(beat)
                                         self.swing = 1 - self.swing
                                         beat_time = (swung_beat * ms_per_beat) + self.offset
-                                        if (end_beat < 250 or on_beat) and (end_beat < 500 or on_measure) and end_beat < 2000:
+                                        if (end_beat < 250 or on_beat) and (
+                                                end_beat < 500 or on_measure) and end_beat < 2000:
                                             progress = beat_time / timeline_width
                                             progress = progress if not math.isnan(progress) else 1
                                             timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - (
@@ -1324,7 +1632,8 @@ class Editor:
                                     else:
                                         cursor_positions = [cursor_spline(self.time - t) for t in
                                                             range(0, 75, 1)]
-                                    self.camera_pos = ((cursor_positions[0][0] - 1) * self.parallax, (cursor_positions[0][1] - 1) * self.parallax)
+                                    self.camera_pos = ((cursor_positions[0][0] - 1) * self.parallax,
+                                                       (cursor_positions[0][1] - 1) * self.parallax)
 
                                     def position(pos):
                                         return self.note_pos_to_abs_pos(pos, box, 1)
@@ -1400,7 +1709,7 @@ class Editor:
             self.time = min(max(self.time, 0),
                             2 ** 31 - 1)  # NOTE: This needs to be 2**31-1 no matter if it's on a 32-bit or 64-bit computer, so no sys.maxsize here
             was_playing = self.playing
-
+            self.unique_label_counter = 0
             if not self.vsync:
                 dt = (time.perf_counter_ns() - dt) / 1000000000
                 time.sleep(max((1 / self.fps_cap) - dt, 0))

@@ -30,11 +30,12 @@ def main():
         print("If you're seeing this, the app encountered a fatal error and had to close.")
         print("Please send crashlog.txt to @balt#6423 on Discord, and tell him what you were doing that caused the crash.")
         print("-------------------")
-        with open("crashlog.txt", "w+") as f:
+        with open(f"{Path(__file__).resolve().parent}{os.sep}crashlog.txt", "w+") as f:
             f.write(traceback.format_exc())
         traceback.print_exc()
+        if sys.gettrace() is not None:  # only reraise if not being debugged
+            raise
     finally:
-        print()
         impl.shutdown()
         sdl2.SDL_GL_DeleteContext(gl_ctx)
         sdl2.SDL_DestroyWindow(window)
@@ -43,7 +44,7 @@ def main():
 
 def init():
     width, height = 1366, 768
-    window_name = "If you see this as a window name, something's wrong."
+    window_name = "SSPy"
     if sdl2.SDL_Init(sdl2.SDL_INIT_EVERYTHING) < 0:
         print("Error: SDL could not initialize! SDL Error: " + sdl2.SDL_GetError().decode("utf-8"))
         exit(1)
