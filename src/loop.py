@@ -8,6 +8,7 @@ import time
 import traceback
 import webbrowser
 from zipfile import ZipFile
+from tkinter import filedialog
 
 import OpenGL.GL as GL
 import imgui
@@ -28,6 +29,7 @@ SCRIPT_DIR = str(Path(__file__).resolve().parent.parent)
 
 FORMATS: tuple = (SSPMLevel, RawDataLevel, VulnusLevel)
 FORMAT_NAMES: tuple = ("SS+ Map", "Raw Data", "Vulnus Map")
+FORMAT_EXTS: tuple = ("*.sspm", "*.txt", "*.json")
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}hit.wav").set_sample_width(2)
 MISSSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}miss.wav").set_sample_width(2)
@@ -154,7 +156,8 @@ class Editor:
         self.colors = []
         self.camera_pos = [0, 0]
         self.parallax = 0
-        self.timings = []
+        self.timings = np.array((), dtype=np.int64)
+        self.time_since_last_change = time.time()
         # Read colors from file
         if os.path.exists(f"{SCRIPT_DIR + os.sep}colors.txt"):
             with open(f"{SCRIPT_DIR + os.sep}colors.txt", "r") as f:
@@ -345,7 +348,15 @@ class Editor:
         imgui.separator()
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
-            self.menu_choice = "edit.cover"
+            changed, value = self.open_file_dialog(
+                {"PNG Image": "*.png", "JPG Image": "*.jpg", "BMP Image": "*.bmp", "GIF image": "*.gif",
+                 "WEBP Image": "*.webp"})
+            if changed:
+                with Image.open(value) as im:
+                    self.level.cover = im.copy()
+                    self.create_image(self.level.cover, self.COVER_ID)
+                self.changed_since_save = True
+                self.time_since_last_change = time.time()
         if imgui.is_item_hovered():
             imgui.set_tooltip("Click to set a cover.")
         clicked = imgui.button("Remove Cover")
@@ -448,80 +459,18 @@ class Editor:
             self.level.cover = None
             self.changed_since_save = True
 
-    def file_display(self, extensions):
-        """Create a file select window."""
-        folder_changed, self.current_folder = imgui.input_text("Directory", self.current_folder, 65536)
-        if folder_changed or not self.files:
-            # If the directory isn't what it was last time, go to the new directory
-            try:
-                os.chdir(
-                    Path.resolve(Path(self.current_folder))
-                )
-            except Exception:
-                os.chdir(Path.home())
-            self.current_folder = os.getcwd()
-        # Create list of selectable files and directories
-        self.files = ['..']  # Add parent directory to self.files to allow going to it
-        for extension in extensions:
-            self.files.extend(sorted([f[2:] for f in glob.glob("./*" + extension)]))  # Get files
-        self.files.extend(sorted(
-            [f[2:] for f in glob.glob(
-                "./*" + os.sep)]))  # Get directories
-        clicked, self.file_choice = imgui.listbox("Levels", self.file_choice,
-                                                  [path for path in self.files])
-        return clicked
-
-    def open_file_dialog(self, extensions: list[str]):
-        clicked = self.file_display(extensions)  # Display a file list
-        if self.file_choice >= len(self.files):
-            self.file_choice = -1
-        choice = Path(self.files[self.file_choice])
-        if clicked:
-            # Check if the selection is a file or not
-            if choice.is_file():
-                if choice.suffix == ".zip":
-                    with ZipFile(str(choice)) as z:
-                        zip_dir = str(Path(self.current_folder).joinpath(choice.stem))
-                        z.extractall(zip_dir)
-                        potential_new_dir = zip_dir
-                else:
-                    imgui.close_current_popup()
-                    return (True, self.files[self.file_choice])  # Return the filename
-            # If the selection is a directory, go to the selected directory
-            else:
-                potential_new_dir = str((Path(self.current_folder) / choice).resolve())
-            try:
-                os.chdir(os.path.expanduser(potential_new_dir))
-                self.current_folder = potential_new_dir
-                self.file_choice = 0
-            except PermissionError as e:
-                self.error = e
-        return False, None
+    def open_file_dialog(self, extensions: dict[str, str]):
+        v = filedialog.askopenfilename(title="Open a file",
+                                       initialdir=self.current_folder,
+                                       filetypes=tuple(extensions.items()))
+        print(repr(v))
+        return bool(len(v)), v
 
     def save_file_dialog(self, suffix):
-        if self.temp_filename is None:
-            self.temp_filename = f"level.{suffix}"
-        clicked = self.file_display([f"*.{suffix}"])  # Display a file list
-        if clicked:
-            path = Path(os.path.join(self.current_folder,
-                                     self.files[self.file_choice])).resolve()  # Get the absolute path of the file
-            # Check if the selection is a file or not
-            if path.is_file():
-                self.temp_filename = path.stem + path.suffix  # Set the filename in the file display to the clicked file's name
-            else:
-                self.current_folder = str(path)  # Move to the clicked folder
-            self.file_choice = 0
-            os.chdir(os.path.expanduser(self.current_folder))
-        # Add the filename selector
-        changed, value = imgui.input_text("Filename", self.temp_filename, 128)
-        if changed:
-            self.temp_filename = value
-        # Return the filepath if the save button has been clicked, return a fail case otherwise
-        if imgui.button("Save"):
-            self.filename = self.temp_filename
-            self.temp_filename = None
-            return True, os.path.join(self.current_folder, self.filename)
-        return False, None
+        v = filedialog.asksaveasfilename(title="Save a file",
+                                         initialdir=self.current_folder,
+                                         filetypes=suffix)
+        return bool(len(v)), v
 
     def keys(self):
         return tuple(self.io.keys_down)
@@ -642,11 +591,11 @@ class Editor:
         name_id = -1
         timings_game = 0
         timings_filepath = ""
-        time_since_last_change = time.time()
         timeline_width = 0
         dragging_timeline = False
         ms_per_beat = 0
         edit_markers_window_open = False
+        import_timings_window_open = False
         marker_add_index = 0
         # Load constant textures
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}nocover.png") as im:
@@ -717,10 +666,10 @@ class Editor:
                     name_id = -1
                 self.RPC.update(state="Developing", small_image="icon", start=start_time,
                                 buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
-            elif self.level is None or (time.time() - time_since_last_change) > 600:  # Is a level open?
+            elif self.level is None or (time.time() - self.time_since_last_change) > 600:  # Is a level open?
                 if name_id != 0:
                     name_id = 0
-                    if (time.time() - time_since_last_change) <= 600:  # Did they leave the app open?
+                    if (time.time() - self.time_since_last_change) <= 600:  # Did they leave the app open?
                         sdl2.SDL_SetWindowTitle(window, "SSPy".encode("utf-8"))
                     self.RPC.update(state="Idling", small_image="icon", start=start_time,
                                     buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
@@ -773,7 +722,7 @@ class Editor:
                         self.filename = None
                         self.playing = False
                         self.changed_since_save = True
-                        time_since_last_change = time.time()
+                        self.time_since_last_change = time.time()
                         self.time = 0
                         self.create_image(
                             self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192),
@@ -782,7 +731,9 @@ class Editor:
 
                     if keys[sdl2.SDLK_o] and not old_keys[sdl2.SDLK_o]:
                         # CTRL + O : Open...
-                        self.menu_choice = "file.open"
+                        changed, value = self.open_file_dialog({k: v for k, v in zip(FORMAT_NAMES, FORMAT_EXTS)})
+                        if changed:
+                            self.load_file(value)
                     if keys[sdl2.SDLK_s] and not old_keys[sdl2.SDLK_s]:
                         # CTRL + S : Save / CTRL + SHIFT + S : Save As...
                         if self.filename is not None and not keys[sdl2.SDL_SCANCODE_LSHIFT]:
@@ -804,14 +755,16 @@ class Editor:
                             self.filename = None
                             self.playing = False
                             self.changed_since_save = True
-                            time_since_last_change = time.time()
+                            self.time_since_last_change = time.time()
                             self.time = 0
                             self.create_image(
                                 self.NO_COVER if self.level.cover is None else self.level.cover.resize((192, 192),
                                                                                                        Image.NEAREST),
                                 self.COVER_ID)
                         if imgui.menu_item("Open...", "ctrl + o")[0]:
-                            self.menu_choice = "file.open"
+                            changed, value = self.open_file_dialog({k: v for k, v in zip(FORMAT_NAMES, FORMAT_EXTS)})
+                            if changed:
+                                self.load_file(value)
                         if imgui.menu_item("Save", "ctrl + s",
                                            enabled=(self.level is not None and self.filename is not None))[0]:
                             if self.filename is not None:
@@ -846,7 +799,7 @@ class Editor:
                                                         self.level.audio,
                                                         self.level.difficulty)
                             self.changed_since_save = True
-                            time_since_last_change = time.time()
+                            self.time_since_last_change = time.time()
                         imgui.push_item_width(240)
                         if isinstance(self.level, SSPMLevel):
                             self.display_sspm()
@@ -856,7 +809,7 @@ class Editor:
                             if changed:
                                 self.level.id = value
                                 self.changed_since_save = True
-                                time_since_last_change = time.time()
+                                self.time_since_last_change = time.time()
                         elif isinstance(self.level, VulnusLevel):
                             self.display_vuln()
                         imgui.separator()
@@ -1024,31 +977,22 @@ class Editor:
                         imgui.text("Mouse wheel or left/right arrows to move your place on the timeline")
                         imgui.text("Space to play/pause the level")
                         imgui.text("Left click to place a note, right click to delete")
+                        imgui.separator()
+                        imgui.text(
+                            "Place colors.txt in the script directory with a list of colors to customize note colors")
+                        imgui.text(
+                            "Place background.png (or .jpg, .webp, whatever) in the script directory to add a background")
                         imgui.end_menu()
                     source_code_was_open = imgui.core.image_button(self.GITHUB_ICON_ID, 26, 26, frame_padding=0)
                     if source_code_was_open:
                         webbrowser.open("https://github.com/balt-is-you-and-shift/SSpy", 2, autoraise=True)
                     imgui.end_main_menu_bar()
                 # Handle popups
-                if self.menu_choice == "file.open":
-                    imgui.open_popup(self.menu_choice)
-                    self.file_choice = 0
-                if imgui.begin_popup("file.open"):
-                    # Open a file dialog
-                    changed, value = self.open_file_dialog([".sspm", ".txt", ".json", ".zip"])
-                    if changed:
-                        self.load_file(value)
-                    imgui.end_popup()
-                if self.menu_choice is not None and self.menu_choice != "file.open":
+                if self.menu_choice is not None:
                     imgui.open_popup(self.menu_choice)
                 if imgui.begin_popup("file.saveas"):
-                    if isinstance(self.level, SSPMLevel):
-                        suffix = "sspm"
-                    elif isinstance(self.level, RawDataLevel):
-                        suffix = "txt"
-                    elif isinstance(self.level, VulnusLevel):
-                        suffix = "json"
-                    changed, value = self.save_file_dialog(suffix)
+                    i = FORMATS.index(self.level.__class__)
+                    changed, value = self.save_file_dialog({FORMAT_NAMES[i]: FORMAT_EXTS[i]})
                     if changed:
                         try:
                             self.level.save(self.filename, self.bpm, self.offset, self.time_signature, self.swing)
@@ -1057,24 +1001,14 @@ class Editor:
                             self.error = e
                         imgui.close_current_popup()
                     imgui.end_popup()
-                if imgui.begin_popup("edit.cover"):
-                    # Load the selected image
-                    changed, value = self.open_file_dialog([".png", ".jpg", ".bmp", ".gif"])
-                    if changed:
-                        with Image.open(value) as im:
-                            self.level.cover = im.copy()
-                            self.create_image(self.level.cover, self.COVER_ID)
-                        self.changed_since_save = True
-                        time_since_last_change = time.time()
-                    imgui.end_popup()
                 if imgui.begin_popup("edit.song"):
                     # Load the selected audio
-                    changed, value = self.open_file_dialog([".mp3", ".ogg", ".wav", ".flac", ".opus"])
+                    changed, value = self.open_file_dialog({"MP3 Audio": "*.mp3", "OGG Audio": "*.ogg", "WAV Audio": "*.wav", "FLAC Audio": "*.flac", "OPUS Audio": "*.opus"})
                     if changed:
                         try:
                             self.level.audio = AudioSegment.from_file(value).set_sample_width(2)
                             self.changed_since_save = True
-                            time_since_last_change = time.time()
+                            self.time_since_last_change = time.time()
                         except pydub.exceptions.CouldntDecodeError:
                             self.error = Exception("Audio file couldn't be read! It might be corrupted.")
                     imgui.end_popup()
@@ -1108,7 +1042,7 @@ class Editor:
                         self.level.notes = new_notes
                         note_offset = None
                         self.changed_since_save = True
-                        time_since_last_change = time.time()
+                        self.time_since_last_change = time.time()
                         imgui.close_current_popup()
                     imgui.end_popup()
                 if bulk_delete_window_open and imgui.begin("Bulk Delete"):
@@ -1140,7 +1074,7 @@ class Editor:
                         for note_time in times:
                             del self.level.notes[note_time]
                         self.changed_since_save = True
-                        time_since_last_change = time.time()
+                        self.time_since_last_change = time.time()
                     imgui.end()
                 if edit_markers_window_open:
                     if isinstance(self.level, SSPMLevel) and len(self.level.marker_types) > 1:
@@ -1194,26 +1128,32 @@ class Editor:
                                         self.displayed_markers[e] = marker
                                         print(self.level.markers[i])
                                 imgui.unindent()
+                            if imgui.button("Close"):
+                                edit_markers_window_open = False
                             imgui.end()
                     else:
                         edit_markers_window_open = False
                 if import_timings_window_open and imgui.begin("Import Timings"):
                     imgui.text("Import timings from a non-SS game.")
                     imgui.text("If you have any game you want added, reach out!")
-                    changed, value = imgui.combo("Game", timings_game, (
+                    changed, value = imgui.combo("Game", timings_game, [
                         "A Dance of Fire and Ice (.adofai)",
-                        "osu! (.osu)"
-                    ))
+                        "osu! (.osu)",
+                        "Clone Hero (.chart)"
+                    ])
                     if changed:
                         timings_game = value
                     changed, value = imgui.input_text("Filepath", timings_filepath, 65536)
                     if changed:
-                        timings_game = value
+                        timings_filepath = value
                     if os.path.isfile(timings_filepath):
                         if imgui.button("Open"):
-                            self.timings = import_timings(timings_filepath, timings_game)
+                            self.timings = np.array(import_timings(timings_filepath, timings_game), np.int64)
                     else:
                         imgui.text_colored("Invalid filepath!", 1, 0.5, 0.5)
+                    if imgui.button("Close"):
+                        import_timings_window_open = False
+                    imgui.end()
                 if spline_window_open:
                     imgui.set_next_window_size(0, 0)
                     imgui.set_next_window_position(0, 0, imgui.APPEARING)
@@ -1275,7 +1215,7 @@ class Editor:
                                     else:
                                         self.level.notes[int(timing)] = [position]
                                 self.changed_since_save = True
-                                time_since_last_change = time.time()
+                                self.time_since_last_change = time.time()
                         imgui.pop_item_width()
                         imgui.end()
                 if self.level is not None:
@@ -1475,6 +1415,28 @@ class Editor:
                                                 thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
                                             )
                                             self.rects_drawn += 1
+                            for timing in self.timings:
+                                progress = timing / timeline_width
+                                if progress < 1:
+                                    progress = progress if not math.isnan(progress) else 1
+                                    timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - self.timeline_height,
+                                                                       x + int(w * progress) + 1, (y + h) - (self.timeline_height * 0.7)),
+                                                                      0x00ff0080))
+                                    self.rects_drawn += 1
+                                    if (self.time <= timing < self.time + self.approach_rate):
+                                        line_prog = 1 - ((timing - self.time) / self.approach_rate)
+                                        # Draw beat marker in note space
+                                        draw_list.add_line(
+                                            *self.note_pos_to_abs_pos(
+                                                (self.vis_map_size / 2 + 1, self.vis_map_size / -2 + 1),
+                                                box, line_prog),
+                                            *self.note_pos_to_abs_pos(
+                                                (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
+                                                box, line_prog),
+                                            0xFF00 | int(0xFF * max(0, line_prog)) << 24,
+                                            thickness=2 * max(0, line_prog)
+                                        )
+                                        self.rects_drawn += 1
                             if self.times_to_display is not None:
                                 # FIXME: Copy the times display for hitsound offsets :(
                                 hitsound_times = self.times_to_display[np.logical_and(
@@ -1566,7 +1528,7 @@ class Editor:
                                         if len(self.level.notes[int(closest_time)]) == 0:
                                             del self.level.notes[int(closest_time)]
                                         self.changed_since_save = True
-                                        time_since_last_change = time.time()
+                                        self.time_since_last_change = time.time()
                                 # Draw the note under the cursor
                                 if not self.playing:
                                     np_x = adjust(note_pos[0], self.note_snapping[0])
@@ -1583,7 +1545,7 @@ class Editor:
                                         else:
                                             self.level.notes[int(math.ceil(self.time))] = [draw_note_pos]
                                         self.changed_since_save = True
-                                        time_since_last_change = time.time()
+                                        self.time_since_last_change = time.time()
                                     if keys[sdl2.SDLK_s] and spline_window_open:
                                         spline_nodes[int(self.time)] = draw_note_pos
                             else:

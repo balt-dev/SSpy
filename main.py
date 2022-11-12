@@ -10,6 +10,7 @@ import OpenGL.GL as gl
 import src.loop as loop
 from pathlib import Path
 import os
+from tkinter import Tk  # this is only for the file dialog
 
 
 import src.style as imgui_style
@@ -23,6 +24,8 @@ def main():
     impl = SDL2Renderer(window)
     impl.refresh_font_texture()
     editor = loop.Editor()
+    root = Tk()
+    root.withdraw()
     try:
         editor.start(window, impl, font, default_font, gl_ctx)
     except Exception:  # Don't catch KeyboardInterrupt
