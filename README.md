@@ -77,7 +77,7 @@ You probably did something that doesn't make sense. Report the crash.
 
 > My song file is corrupted! What do I do?
 
-This usually happens when the level is interrupted during saving. It's good practice to make backups often.
+This usually happens when the level is interrupted during saving. It's good practice to make backups often. Not much you can do :/
 
 ## Notes
 
