@@ -32,11 +32,11 @@ SCRIPT_DIR = str(Path(__file__).resolve().parent.parent)
 
 FORMATS: tuple = (SSPMLevel, RawDataLevel, VulnusLevel)
 FORMAT_NAMES: tuple = ("SS+ Map", "Raw Data", "Vulnus Map")
-TIMING_GAMES = {
-    "A Dance of Fire and Ice": "*.adofai",
-    "osu!": "*.osu",
-    "Clone Hero": "*.chart"
-}
+TIMING_GAMES = (
+    "*.adofai",
+    "*.osu",
+    "*.chart"
+)
 FORMAT_EXTS: tuple = ("*.sspm", "*.txt", "*.json")
 DIFFICULTIES: tuple = ("Unspecified", "Easy", "Medium", "Hard", "LOGIC?", "Tasukete")
 HITSOUND = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}hit.wav").set_sample_width(2)
@@ -372,8 +372,7 @@ class Editor:
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
             changed, value = self.open_file_dialog(
-                {"PNG Image": "*.png", "JPG Image": "*.jpg", "BMP Image": "*.bmp", "GIF image": "*.gif",
-                 "WEBP Image": "*.webp"})
+                {"Image": "*.png *.jpg *.bmp *.gif *.webp"})
             if changed:
                 with Image.open(value) as im:
                     self.level.cover = im.copy()
@@ -474,8 +473,7 @@ class Editor:
         clicked = imgui.image_button(self.COVER_ID, 192, 192, frame_padding=0)
         if clicked:
             changed, value = self.open_file_dialog(
-                {"PNG Image": "*.png", "JPG Image": "*.jpg", "BMP Image": "*.bmp", "GIF image": "*.gif",
-                 "WEBP Image": "*.webp"})
+                {"Image": "*.png *.jpg *.bmp *.gif *.webp"})
             if changed:
                 with Image.open(value) as im:
                     self.level.cover = im.copy()
@@ -864,8 +862,7 @@ class Editor:
                         if clicked:
                             # Load the selected audio
                             changed, value = self.open_file_dialog(
-                                {"MP3 Audio": "*.mp3", "OGG Audio": "*.ogg", "WAV Audio": "*.wav",
-                                 "FLAC Audio": "*.flac", "OPUS Audio": "*.opus"})
+                                {"Audio": "*.mp3 *.ogg *.wav *.flac *.opus"})
                             if changed:
                                 try:
                                     self.level.audio = AudioSegment.from_file(value).set_sample_width(2)
@@ -1017,10 +1014,10 @@ class Editor:
                         if isinstance(self.level, SSPMLevel) and imgui.button("Edit Markers"):
                             edit_markers_window_open = isinstance(self.level, SSPMLevel)
                         if imgui.button("Import Timings"):
-                            changed, value = self.open_file_dialog(TIMING_GAMES)
+                            changed, value = self.open_file_dialog({"Chart": " ".join(TIMING_GAMES)})
                             if changed:
                                 timings_filepath = value
-                                timings_game = tuple(TIMING_GAMES.values()).index("*" + Path(value).suffix)
+                                timings_game = TIMING_GAMES.index("*" + Path(value).suffix)
                                 try:
                                     self.timings = np.array(import_timings(timings_filepath, timings_game), np.int64)
                                 except Exception as e:
