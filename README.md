@@ -82,8 +82,8 @@ This usually happens when the level is interrupted during saving. It's good prac
 ## Notes
 
 This is still beta software! Don't be surprised if it crashes. Report the crash to me and I'll handle it.\
-The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]
-
+~~The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]~~
+The in-app file picker has been removed in favor of a native dialog. 
 
 [1]: https://i.imgur.com/7JyRsjb.png (Permission proof)
 
