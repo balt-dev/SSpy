@@ -28,13 +28,17 @@ def import_timings(filepath, game) -> list[int]:
                 actions[action["floor"]] = [{k: v for k, v in action.items() if k != "floor"}]
         old_angle = 0
         for i, angle in enumerate(level["angleData"]):
+            actual_angle = angle
+            if angle == 999:  # Midspin
+                angle = (level["angleData"][i - 1] - 180) % 360
             angle_delta = (angle % 360) - (old_angle % 360) % 360
             angle_delta = (angle_delta * (1 if twirled else -1)) % 360
             angle_delta += 180
             if multi_planet:
                 angle_delta = (angle_delta - 60)
             angle_delta %= 360
-            old_angle = angle
+            if actual_angle != 999:  # Midspin
+                old_angle = angle
             time += (60000 / bpm) * (angle_delta / 180)
             timings.add(int(time))
             for action in actions.get(i, []):
@@ -71,7 +75,7 @@ def import_timings(filepath, game) -> list[int]:
         resolution = int(raw_chart[start:start + (raw_chart[start:].index("\n"))])
         for difficulty in [chparse.EXPERT, chparse.HARD, chparse.MEDIUM, chparse.EASY, chparse.NA]:
             if chparse.GUITAR in chart.instruments[difficulty]:
-                track = chart.instruments[chparse.EXPERT][chparse.GUITAR]
+                track = chart.instruments[difficulty][chparse.GUITAR]
                 sync = chart.sync_track
                 break
         else:
