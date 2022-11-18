@@ -1,12 +1,15 @@
 import base64
 import binascii
+import colorsys
 import ctypes
+import hashlib
 import http.client
 import math
 import sys
 import time
 import traceback
 import webbrowser
+from more_itertools import locate
 from zipfile import ZipFile
 from tkinter import filedialog
 
@@ -107,7 +110,21 @@ def play_at_position(audio, position):
 def adjust(x, s): return (((round(((x) / 2) * (s - 1)) / (s - 1)) * 2)) if s != 0 else x
 
 
-# NOTE: https://www.desmos.com/calculator/8akx7lcdxq
+def tuplehash(v):
+    x = 0x345678
+    mult = 1000003
+    l = len(v)
+    for i, ob in enumerate(v, 1):
+        y = int.from_bytes(hashlib.sha256(ob.to_bytes(math.ceil(math.log(ob, 256)), "little")).digest(), "little")
+        x = ((x ^ y) * mult)
+        mult += (82520 + 2 * (l - i))
+    x += 97531
+    return x % (2**64)
+
+
+def get_time_color():
+    r, g, b = colorsys.hsv_to_rgb(time.time() / 3, .375, 1)
+    return 0xFF000000 | (int(r * 255) << 16) | (int(g * 255) << 8) | int(b * 255)
 
 
 class Editor:
@@ -152,6 +169,7 @@ class Editor:
         self.fps_cap = 100
         self.vsync = False
         self.rects_drawn = 0
+        self.rounding = 0
         self.volume = 0
         self.waveform_res = 4
         self.timeline_height = 50
@@ -476,7 +494,6 @@ class Editor:
         v = filedialog.askopenfilename(title="Open a file",
                                        initialdir=self.current_folder,
                                        filetypes=tuple(extensions.items()))
-        print(repr(v))
         return bool(len(v)), v
 
     def save_file_dialog(self, suffix):
@@ -591,6 +608,8 @@ class Editor:
         tex_ids = GL.glGenTextures(3)  # NOTE: Update this when you add more images
         note_offset = None
         old_keys = self.keys()
+        easter_egg_active = False  # feel free to enable this from here, but it's more fun if you find what makes it true w/o mofifying the code
+        keys_pressed = []
         cursor_positions = [[0, 0]]
         level_was_active = False
         extent = 0
@@ -599,6 +618,7 @@ class Editor:
         spline_amount = 5
         spline_window_open = False
         bulk_delete_window_open = False
+        tap_timings_window_open = False
         bulk_delete_start_time = 0
         bulk_delete_end_time = 0
         cursor_spline = None
@@ -608,6 +628,9 @@ class Editor:
         ms_per_beat = 0
         edit_markers_window_open = False
         marker_add_index = 0
+        timings_quantize = True
+        easter_egg_activated = False
+
         # Load constant textures
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}nocover.png") as im:
             self.NO_COVER = im.copy()
@@ -635,6 +658,17 @@ class Editor:
             impl.process_inputs()
             imgui.new_frame()
             keys = self.keys()
+            keys_changed = []
+            if old_keys != keys:
+                keys_changed = locate([a and not b for a, b in zip(keys, old_keys)])
+                keys_changed = [*keys_changed]
+                keys_pressed.extend(keys_changed)
+                if tuplehash(keys_pressed) == 3693585790315968031:
+                    easter_egg_active = not easter_egg_active
+                    imgui.open_popup("Easter Egg")
+                    easter_egg_activated = True
+                if len(keys_changed) and len(keys_pressed) > 64:
+                    keys_pressed = keys_pressed[1:]
             mouse = tuple(self.io.mouse_down)
             if self.bpm:
                 ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
@@ -840,31 +874,6 @@ class Editor:
                                 except pydub.exceptions.CouldntDecodeError:
                                     self.error = Exception("Audio file couldn't be read! It might be corrupted.")
                         imgui.pop_item_width()
-                        imgui.end_menu()
-                    if imgui.begin_menu("Preferences", self.level is not None):
-                        imgui.push_item_width(120)
-                        changed, value = imgui.checkbox("Vsync?", self.vsync)
-                        if changed:
-                            sdl2.SDL_GL_SetSwapInterval(int(value))  # Turn on/off VSync
-                            self.vsync = value
-                        if not self.vsync:
-                            imgui.indent()
-                            changed, value = imgui.input_int("FPS Cap", self.fps_cap, 0)
-                            if changed:
-                                self.fps_cap = min(max(value, 15), 360)
-                            imgui.unindent()
-                        changed, value = imgui.checkbox("Draw notes on timeline?", self.draw_notes)
-                        if changed:
-                            self.draw_notes = value
-                        changed, value = imgui.checkbox("Draw audio on timeline?", self.draw_audio)
-                        if changed:
-                            self.draw_audio = value
-                        if self.draw_audio:
-                            imgui.indent()
-                            changed, value = imgui.slider_int("Waveform resolution (px)", self.waveform_res, 1, 20)
-                            if changed:
-                                self.waveform_res = value
-                            imgui.unindent()
                         imgui.separator()
                         changed, value = imgui.input_float("BPM", self.bpm, 0)
                         if changed:
@@ -901,9 +910,34 @@ class Editor:
                             changed, value = imgui.input_int("Beat Divisor", self.beat_divisor, 0)
                             if changed:
                                 self.beat_divisor = min(max(value, 1), 100000)
-                        else:
-                            imgui.push_item_width(49)
+                        imgui.pop_item_width()
+                        imgui.end_menu()
+                    if imgui.begin_menu("Preferences", self.level is not None):
+                        imgui.push_item_width(120)
+                        changed, value = imgui.checkbox("Vsync?", self.vsync)
+                        if changed:
+                            sdl2.SDL_GL_SetSwapInterval(int(value))  # Turn on/off VSync
+                            self.vsync = value
+                        if not self.vsync:
+                            imgui.indent()
+                            changed, value = imgui.input_int("FPS Cap", self.fps_cap, 0)
+                            if changed:
+                                self.fps_cap = min(max(value, 15), 360)
+                            imgui.unindent()
+                        changed, value = imgui.checkbox("Draw notes on timeline?", self.draw_notes)
+                        if changed:
+                            self.draw_notes = value
+                        changed, value = imgui.checkbox("Draw audio on timeline?", self.draw_audio)
+                        if changed:
+                            self.draw_audio = value
+                        if self.draw_audio:
+                            imgui.indent()
+                            changed, value = imgui.slider_int("Waveform resolution (px)", self.waveform_res, 1, 20)
+                            if changed:
+                                self.waveform_res = value
+                            imgui.unindent()
                         imgui.separator()
+                        imgui.push_item_width(49)
                         # Display note snapping
                         changed, value = imgui.input_int("##", self.note_snapping[0], 0)
                         if changed:
@@ -966,15 +1000,20 @@ class Editor:
                         changed, value = imgui.input_float("Map Size", self.vis_map_size, 0, format="%.2f")
                         if changed:
                             self.vis_map_size = max(value, 0.01)
+                        changed, value = imgui.slider_int("Note Rounding", int(self.rounding * 100), 0, 100)
+                        if changed:
+                            self.rounding = value / 100
                         imgui.pop_item_width()
                         imgui.end_menu()
                     if imgui.begin_menu("Tools", self.level is not None):
                         if imgui.button("Offset Notes"):
                             self.menu_choice = "tools.offset_notes"
-                        if imgui.button("Spline"):
-                            spline_window_open = True
                         if imgui.button("Bulk Delete"):
                             bulk_delete_window_open = True
+                        imgui.separator()
+                        if imgui.button("Spline"):
+                            spline_window_open = True
+                        imgui.separator()
                         if isinstance(self.level, SSPMLevel) and imgui.button("Edit Markers"):
                             edit_markers_window_open = isinstance(self.level, SSPMLevel)
                         if imgui.button("Import Timings"):
@@ -986,6 +1025,8 @@ class Editor:
                                     self.timings = np.array(import_timings(timings_filepath, timings_game), np.int64)
                                 except Exception as e:
                                     self.error = e
+                        if imgui.button("Tap Timings"):
+                            tap_timings_window_open = True
                         if self.timings.size > 0:
                             imgui.indent()
                             if imgui.button("Clear Timings"):
@@ -1092,6 +1133,7 @@ class Editor:
                         imgui.set_next_window_size(0, 0)
                         if imgui.begin("Markers"):
                             imgui.text("Edit markers within the level.")
+                            imgui.separator()
                             changed, value = imgui.combo("##add-marker", marker_add_index,
                                                          [*self.level.marker_types][1:])
                             if changed:
@@ -1134,10 +1176,8 @@ class Editor:
                                                       fields=[VAR_DEFAULTS[var_type - 1] for var_type in
                                                               tuple(self.level.marker_types.values())[
                                                           marker["m_type"]]])
-                                        print(marker, self.level.markers[i])
                                         self.level.markers[i] = marker
                                         self.displayed_markers[e] = marker
-                                        print(self.level.markers[i])
                                 imgui.unindent()
                             if imgui.button("Close"):
                                 edit_markers_window_open = False
@@ -1146,10 +1186,10 @@ class Editor:
                         edit_markers_window_open = False
                 if spline_window_open:
                     imgui.set_next_window_size(0, 0)
-                    imgui.set_next_window_position(0, 0, imgui.APPEARING)
                     if imgui.begin("Spline"):
                         imgui.text("Create a cubic spline curve from nodes.")
                         imgui.text("Press S to create a node on the playfield at the mouse.")
+                        imgui.separator()
                         imgui.push_item_width(120)
                         imgui.columns(2)
                         imgui.separator()
@@ -1207,6 +1247,34 @@ class Editor:
                                 self.changed_since_save = True
                                 self.time_since_last_change = time.time()
                         imgui.pop_item_width()
+                        imgui.end()
+                if tap_timings_window_open:
+                    imgui.set_next_window_size(0, 0)
+                    if imgui.begin("Tap Timings"):
+                        imgui.text("Tap out timings to use in the level.")
+                        imgui.separator()
+                        if self.bpm != 0:
+                            changed, value = imgui.checkbox("Quantize to BPM?", timings_quantize)
+                            if changed:
+                                timings_quantize = value
+                        else:
+                            timings_quantize = False
+                        _, _ = imgui.input_text("##timing-tap", "Focus here and tap to add timings.", 256, imgui.INPUT_TEXT_READ_ONLY)
+                        if imgui.is_item_active() and len(keys_changed) > 0:
+                            if not self.playing:
+                                self.playing = True
+                                if self.level.audio is not None:
+                                    self.playback = play_at_position(
+                                        self.speed_change(self.level.audio + self.volume, self.audio_speed),
+                                        ((self.time) / 1000) / self.audio_speed)
+                                self.starting_time = time.perf_counter_ns()
+                                self.starting_position = self.time
+                            set_timing = self.time
+                            if timings_quantize:
+                                set_timing = round((set_timing - self.offset) / (ms_per_beat / self.beat_divisor)) * (ms_per_beat / self.beat_divisor)
+                            self.timings = np.unique(np.append(self.timings, int(set_timing)))
+                        if imgui.button("Done"):
+                            tap_timings_window_open = False
                         imgui.end()
                 if self.level is not None:
                     size = self.io.display_size
@@ -1405,28 +1473,23 @@ class Editor:
                                                 thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
                                             )
                                             self.rects_drawn += 1
-                            for timing in self.timings:
+                            for i, timing in enumerate(self.timings[np.logical_and(self.time <= self.timings, self.timings < (self.time + self.approach_rate))]):
                                 progress = timing / timeline_width
                                 if progress < 1:
                                     progress = progress if not math.isnan(progress) else 1
-                                    timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - self.timeline_height,
-                                                                       x + int(w * progress) + 1, (y + h) - (self.timeline_height * 0.7)),
-                                                                      0x8000ff00))
+                                    line_prog = 1 - ((timing - self.time) / self.approach_rate)
+                                    # Draw beat marker in note space
+                                    draw_list.add_line(
+                                        *self.note_pos_to_abs_pos(
+                                            (self.vis_map_size / 2 + 1, self.vis_map_size / -2 + 1),
+                                            box, line_prog),
+                                        *self.note_pos_to_abs_pos(
+                                            (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
+                                            box, line_prog),
+                                        0xFF00 | int(0xFF * max(0, line_prog)) << 24,
+                                        thickness=2 * max(0, line_prog)
+                                    )
                                     self.rects_drawn += 1
-                                    if (self.time <= timing < self.time + self.approach_rate):
-                                        line_prog = 1 - ((timing - self.time) / self.approach_rate)
-                                        # Draw beat marker in note space
-                                        draw_list.add_line(
-                                            *self.note_pos_to_abs_pos(
-                                                (self.vis_map_size / 2 + 1, self.vis_map_size / -2 + 1),
-                                                box, line_prog),
-                                            *self.note_pos_to_abs_pos(
-                                                (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
-                                                box, line_prog),
-                                            0xFF00 | int(0xFF * max(0, line_prog)) << 24,
-                                            thickness=2 * max(0, line_prog)
-                                        )
-                                        self.rects_drawn += 1
                             if self.times_to_display is not None:
                                 # FIXME: Copy the times display for hitsound offsets :(
                                 hitsound_times = self.times_to_display[np.logical_and(
@@ -1591,12 +1654,14 @@ class Editor:
                                         return self.note_pos_to_abs_pos(pos, box, 1)
 
                                     draw_list.add_circle_filled(*position(cursor_positions[0]),
-                                                                (square_side / self.vis_map_size) / 20, 0xFFFFFFFF,
+                                                                (square_side / self.vis_map_size) / 20,
+                                                                get_time_color() if easter_egg_active else 0xFFFFFFFF,
                                                                 num_segments=32)
                                 else:
                                     self.camera_pos = (0, 0)
                                     cursor_positions = []
-                                draw_list.add_polyline([position(p) for p in cursor_positions], 0x40FFFFFF,
+                                draw_list.add_polyline([position(p) for p in cursor_positions],
+                                                       get_time_color() & 0x40FFFFFF if easter_egg_active else 0x40FFFFFF,
                                                        thickness=(square_side / self.vis_map_size) / 20)
                             # Draw current statistics
                             fps_text = f"{int(self.io.framerate)}{f'/{self.fps_cap}' if not self.vsync else ''} FPS"
@@ -1648,6 +1713,19 @@ class Editor:
                             imgui.close_current_popup()
                             self.error = None
                         imgui.end_popup()
+            if easter_egg_activated:
+                imgui.push_style_color(imgui.COLOR_BORDER, 0, 0, 0, 0)
+                imgui.push_style_color(imgui.COLOR_POPUP_BACKGROUND, 0, 0, 0, 0.5)
+                imgui.push_style_var(imgui.STYLE_POPUP_ROUNDING, 0)
+                imgui.push_style_color(imgui.COLOR_TEXT, 0, 1, 0, 1)
+                imgui.push_style_color(imgui.COLOR_HEADER_ACTIVE, 0, 0, 0, 0)
+                imgui.push_style_color(imgui.COLOR_HEADER_HOVERED, 0, 0, 0, 0)
+                if imgui.begin_popup("Easter Egg", imgui.WINDOW_NO_TITLE_BAR):
+                    imgui.set_window_font_scale(2)
+                    imgui.text("[ ACCESS GRANTED ]")
+                    imgui.end_popup()
+                imgui.pop_style_color(5)
+                imgui.pop_style_var(1)
             old_mouse = mouse
             old_keys = keys
             GL.glClearColor(0., 0., 0., 1)
@@ -1691,7 +1769,9 @@ class Editor:
             position = self.note_pos_to_abs_pos(note_pos, box, progress)
             draw_list.add_rect(position[0] - note_size // 2, position[1] - note_size // 2,
                                position[0] + note_size // 2, position[1] + note_size // 2,
-                               (int(alpha * max(progress, 0)) << 24) | color, thickness=max((note_size // 8), 0))
+                               (int(alpha * max(progress, 0)) << 24) | color, thickness=max((note_size // 8), 0),
+                               rounding=self.rounding * note_size / 2)
+
             self.rects_drawn += 1
 
     def saveas(self):

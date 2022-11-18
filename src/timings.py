@@ -64,13 +64,23 @@ def import_timings(filepath, game) -> list[int]:
     elif game == 2:  # Clone Hero
         assert Path(filepath).suffix == ".chart", "Unsupported file format! Required: .chart"
         with open(filepath, "r") as f:
+            raw_chart = f.read().replace("\r", "")
+            f.seek(0)
             chart = chparse.load(f)
+        start = raw_chart.index("Resolution = ") + 13
+        resolution = int(raw_chart[start:start + (raw_chart[start:].index("\n"))])
         for difficulty in [chparse.EXPERT, chparse.HARD, chparse.MEDIUM, chparse.EASY, chparse.NA]:
             if chparse.GUITAR in chart.instruments[difficulty]:
                 track = chart.instruments[chparse.EXPERT][chparse.GUITAR]
+                sync = chart.sync_track
                 break
         else:
             raise AssertionError("Couldn't find a guitar chart!")
-        for note in track:
-            timings.add(note.time)
+        bpm = 120
+        for event in sorted([*track, *sync], key=lambda x: x.time):
+            if isinstance(event, chparse.note.Note):
+                timings.add(int((event.time / resolution) * (60000 / bpm)))
+            elif isinstance(event, chparse.note.SyncEvent):
+                if event.kind == chparse.NoteTypes.BPM:
+                    bpm = event.value / 1000
     return sorted(timings)
