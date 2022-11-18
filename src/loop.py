@@ -663,7 +663,7 @@ class Editor:
                 keys_changed = locate([a and not b for a, b in zip(keys, old_keys)])
                 keys_changed = [*keys_changed]
                 keys_pressed.extend(keys_changed)
-                if tuplehash(keys_pressed) == 3693585790315968031:
+                if tuplehash(keys_pressed) == 3693585790315968031:  # it's more fun if you find out how to do it legit but i won't be mad if you just remove this check
                     easter_egg_active = not easter_egg_active
                     imgui.open_popup("Easter Egg")
                     easter_egg_activated = True
