@@ -12,6 +12,7 @@ import webbrowser
 from more_itertools import locate
 from zipfile import ZipFile
 from tkinter import filedialog
+from ctypes import POINTER, c_int
 
 import OpenGL.GL as GL
 import imgui
@@ -154,6 +155,7 @@ class Editor:
         self.filename = None
         self.temp_filename = None
         self.files = None
+        self.preview_mode = False
         self.file_choice = -1
         self.current_folder = str(Path.home())
         self.level = None
@@ -211,7 +213,7 @@ class Editor:
         if speed < 0:
             sound = sound.reverse()
         try:
-            assert sound.duration_seconds / speed < 3600, "The audio that was going to be played is too large.\nIf you want to circumvent this check, go to line 133 in src/loop.py and remove lines 132 through 137."
+            assert sound.duration_seconds / speed < 3600, "The audio that was going to be played is too large.\nIf you want to circumvent this check, go to line 133 in src/loop.py and remove lines 211 through 220."
             assert abs(
                 speed) * sound.frame_rate < 2147483647, "The audio that was going to be played is too fast, and the speed in samples can't be converted to a C integer."
         except AssertionError as e:
@@ -787,7 +789,17 @@ class Editor:
                                 self.error = e
                         else:
                             self.saveas()
-                if imgui.begin_main_menu_bar():
+                    if keys[sdl2.SDLK_p] and not old_keys[sdl2.SDLK_p]:
+                        # CTRL + P : Preview
+                        self.preview_mode = not self.preview_mode
+                        if self.preview_mode:
+                            self.menu_choice = "preview.alert"
+                        if keys[sdl2.SDL_SCANCODE_LSHIFT]:
+                            w, h = POINTER(c_int)(c_int(65535)), POINTER(c_int)(c_int(65535))  # woo! learned something
+                            sdl2.SDL_GetWindowSize(window, w, h)
+                            w, h = w[0], h[0]
+                            sdl2.SDL_SetWindowSize(window, min(w, h), min(w, h))
+                if not self.preview_mode and imgui.begin_main_menu_bar():
                     if imgui.begin_menu("File"):
                         if imgui.menu_item("New", "ctrl + n")[0]:
                             self.notes_changed = True
@@ -1094,6 +1106,11 @@ class Editor:
                         self.time_since_last_change = time.time()
                         imgui.close_current_popup()
                     imgui.end_popup()
+                if imgui.begin_popup("preview.alert"):
+                    imgui.text("You have just entered preview mode.")
+                    imgui.text("This hides the timeline and menu bar.")
+                    imgui.text("If you want to exit preview mode, press Ctrl+P once again.")
+                    imgui.end_popup()
                 if bulk_delete_window_open and imgui.begin("Bulk Delete"):
                     imgui.text("Delete all notes within a specified time slice.")
                     imgui.columns(2, border=False)
@@ -1275,8 +1292,8 @@ class Editor:
                         imgui.end()
                 if self.level is not None:
                     size = self.io.display_size
-                    imgui.set_next_window_size(size[0], size[1] - 26)
-                    imgui.set_next_window_position(0, 26)
+                    imgui.set_next_window_size(size[0], size[1] - (0 if self.preview_mode else 26))
+                    imgui.set_next_window_position(0, 0 if self.preview_mode else 26)
                     mouse_pos = tuple(self.io.mouse_pos)
                     imgui.push_style_var(imgui.STYLE_WINDOW_PADDING, (0, 0))
                     if imgui.core.begin("Level",
@@ -1309,7 +1326,7 @@ class Editor:
                             adjusted_y = (((y + h) / 2) - (square_side / 2))
                             box = (adjusted_x, adjusted_y, adjusted_x + square_side, adjusted_y + square_side)
                             timeline_rects.append(
-                                DelayedRect((x, (y + h) - self.timeline_height, x + w, (y + h)), 0x80404040))
+                                DelayedRect((x, (y + h) - (0 if self.preview_mode else self.timeline_height), x + w, (y + h)), 0x80404040))
                             self.rects_drawn += 3
                             note_pos = [(((mouse_pos[0] - (adjusted_x)) / (square_side)) * self.vis_map_size) - (
                                 self.vis_map_size / 2) + 1,
@@ -1319,7 +1336,7 @@ class Editor:
                                 ((note_pos[0] - 1) * self.sensitivity) + 1, ((note_pos[1] - 1) * self.sensitivity) + 1)
                             note_pos[0] -= self.camera_pos[0]
                             note_pos[1] -= self.camera_pos[1]
-                            if (self.level.audio is not None and audio_data is not None
+                            if ((not self.preview_mode) and self.level.audio is not None and audio_data is not None
                                     and self.draw_audio and self.timeline_height > 20):
                                 center = (y + h) - (self.timeline_height / 2)
                                 length = int(self.level.audio.frame_rate * timeline_width / 1000)
@@ -1345,7 +1362,7 @@ class Editor:
                                         self.rects_drawn += 1
                                     except (IndexError, ValueError):
                                         break
-                            if self.draw_notes and self.times_to_display is not None:
+                            if not self.preview_mode and self.draw_notes and self.times_to_display is not None:
                                 # Draw notes
                                 for i, note in enumerate(self.times_to_display):
                                     color = (self.colors[i % len(self.colors)] & 0xFFFFFF) | 0x40000000
@@ -1372,121 +1389,122 @@ class Editor:
                                         w - text_width), text_width / 2)
 
                             # Draw the current time above the visible area
-                            draw_list.add_text(
-                                center_of_view(f"{self.time / 1000:.3f}"),
-                                y + h - (self.timeline_height + 20), 0x80FFFFFF, f"{self.time / 1000:.3f}")
-                            if self.bpm:
-                                # Draw the current measure and beat
-                                raw_current_beat = (self.time - self.offset) / (ms_per_beat)
-                                current_beat = self.adjust_swing(raw_current_beat)
-                                m_text = f"Measure {current_beat // self.time_signature[0]:.0f}"
+                            if not self.preview_mode:
                                 draw_list.add_text(
-                                    center_of_view(m_text),
-                                    y + h - (self.timeline_height + 60), 0x80FFFFFF, m_text)
-                                b_text = f"Beat {f'{current_beat % (self.time_signature[0] / (self.time_signature[1] / 4)):.2f}'.rstrip('0').rstrip('.')}"
-                                draw_list.add_text(
-                                    center_of_view(b_text),
-                                    y + h - (self.timeline_height + 40), 0x80FFFFFF, b_text)
+                                    center_of_view(f"{self.time / 1000:.3f}"),
+                                    y + h - (self.timeline_height + 20), 0x80FFFFFF, f"{self.time / 1000:.3f}")
+                                if self.bpm:
+                                    # Draw the current measure and beat
+                                    raw_current_beat = (self.time - self.offset) / (ms_per_beat)
+                                    current_beat = self.adjust_swing(raw_current_beat)
+                                    m_text = f"Measure {current_beat // self.time_signature[0]:.0f}"
+                                    draw_list.add_text(
+                                        center_of_view(m_text),
+                                        y + h - (self.timeline_height + 60), 0x80FFFFFF, m_text)
+                                    b_text = f"Beat {f'{current_beat % (self.time_signature[0] / (self.time_signature[1] / 4)):.2f}'.rstrip('0').rstrip('.')}"
+                                    draw_list.add_text(
+                                        center_of_view(b_text),
+                                        y + h - (self.timeline_height + 40), 0x80FFFFFF, b_text)
 
-                                floor_beat = math.floor(raw_current_beat)
-                                # Play the metronome
-                                if self.metronome and self.playing:
-                                    beat_skipped = floor_beat - math.floor(old_beat)
-                                    if beat_skipped:
-                                        if old_beat // self.time_signature[0] != current_beat // self.time_signature[
-                                                0]:  # If a measure has passed
-                                            _play_with_simpleaudio(METRONOME_M)
-                                        else:
-                                            _play_with_simpleaudio(METRONOME_B)
-                                old_beat = current_beat
-                                # Draw markers
-                                if isinstance(self.level, SSPMLevel):
-                                    old_time = -1
-                                    offset = 0
-                                    self.displayed_markers = []
-                                    for i, marker in enumerate(self.level.markers):  # XXX: this isn't very good
-                                        if marker["time"] == old_time:
-                                            offset += 1
-                                        else:
-                                            offset = 0
-                                            old_time = marker["time"]
-                                        if self.time <= marker["time"] < (self.time + self.approach_rate):
-                                            line_prog = 1 - ((marker["time"] - self.time) / self.approach_rate)
-                                            draw_list.add_line(
-                                                *self.note_pos_to_abs_pos(
-                                                    (self.vis_map_size / 2 + 1,
-                                                     (self.vis_map_size / 2 + 1) + (0.05 * offset)),
-                                                    box, line_prog),
-                                                *self.note_pos_to_abs_pos(
-                                                    (self.vis_map_size / -2 + 1,
-                                                     (self.vis_map_size / 2 + 1) + (0.05 * offset)),
-                                                    box, line_prog),
-                                                0xFFFFFF | (int(0xFF * max(0, line_prog)) << 24),
-                                                thickness=4 * line_prog
-                                            )
-                                        progress = marker["time"] / timeline_width
-                                        timeline_rects.append(
-                                            DelayedRect((x + int(w * progress), (y + h) - self.timeline_height * 0.2,
-                                                         x + int(w * progress) + 1,
-                                                         (y + h) - self.timeline_height * 0.4),
-                                                        0x00ff00ff))
-                                        if self.time == marker["time"]:
-                                            self.displayed_markers.append((i, marker))
+                                    floor_beat = math.floor(raw_current_beat)
+                                    # Play the metronome
+                                    if self.metronome and self.playing:
+                                        beat_skipped = floor_beat - math.floor(old_beat)
+                                        if beat_skipped:
+                                            if old_beat // self.time_signature[0] != current_beat // self.time_signature[
+                                                    0]:  # If a measure has passed
+                                                _play_with_simpleaudio(METRONOME_M)
+                                            else:
+                                                _play_with_simpleaudio(METRONOME_B)
+                                    old_beat = current_beat
+                                    # Draw markers
+                                    if isinstance(self.level, SSPMLevel):
+                                        old_time = -1
+                                        offset = 0
+                                        self.displayed_markers = []
+                                        for i, marker in enumerate(self.level.markers):  # XXX: this isn't very good
+                                            if marker["time"] == old_time:
+                                                offset += 1
+                                            else:
+                                                offset = 0
+                                                old_time = marker["time"]
+                                            if self.time <= marker["time"] < (self.time + self.approach_rate):
+                                                line_prog = 1 - ((marker["time"] - self.time) / self.approach_rate)
+                                                draw_list.add_line(
+                                                    *self.note_pos_to_abs_pos(
+                                                        (self.vis_map_size / 2 + 1,
+                                                         (self.vis_map_size / 2 + 1) + (0.05 * offset)),
+                                                        box, line_prog),
+                                                    *self.note_pos_to_abs_pos(
+                                                        (self.vis_map_size / -2 + 1,
+                                                         (self.vis_map_size / 2 + 1) + (0.05 * offset)),
+                                                        box, line_prog),
+                                                    0xFFFFFF | (int(0xFF * max(0, line_prog)) << 24),
+                                                    thickness=4 * line_prog
+                                                )
+                                            progress = marker["time"] / timeline_width
+                                            timeline_rects.append(
+                                                DelayedRect((x + int(w * progress), (y + h) - self.timeline_height * 0.2,
+                                                             x + int(w * progress) + 1,
+                                                             (y + h) - self.timeline_height * 0.4),
+                                                            0x00ff00ff))
+                                            if self.time == marker["time"]:
+                                                self.displayed_markers.append((i, marker))
+                                            self.rects_drawn += 1
+
+                                    if self.bpm_markers:
+                                        # Draw beat markers on timeline
+                                        end_beat = (timeline_width / ms_per_beat)
+                                        for beat in range(int(end_beat * self.beat_divisor + 1), 0, -1):
+                                            beat /= self.beat_divisor
+                                            on_measure = not (beat % self.time_signature[0])
+                                            on_beat = not (beat % 1)
+                                            self.swing = 1 - self.swing  # Invert this because it draws in the wrong place otherwise
+                                            swung_beat = self.adjust_swing(beat)
+                                            self.swing = 1 - self.swing
+                                            beat_time = (swung_beat * ms_per_beat) + self.offset
+                                            if (end_beat < 250 or on_beat) and (
+                                                    end_beat < 500 or on_measure) and end_beat < 2000:
+                                                progress = beat_time / timeline_width
+                                                progress = progress if not math.isnan(progress) else 1
+                                                timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - (
+                                                    self.timeline_height * (
+                                                        0.3 if on_measure else 0.2 if on_beat else 0.1)),
+                                                    x + int(w * progress) + 1, (y + h)),
+                                                    0xff0000ff if on_measure else 0x800000ff))
+                                                self.rects_drawn += 1
+                                            if (self.time <= beat_time < self.time + self.approach_rate):
+                                                line_prog = 1 - ((beat_time - self.time) / self.approach_rate)
+                                                # Draw beat marker in note space
+                                                draw_list.add_rect(
+                                                    *self.note_pos_to_abs_pos(
+                                                        (self.vis_map_size / 2 + 1, self.vis_map_size / 2 + 1),
+                                                        box, line_prog),
+                                                    *self.note_pos_to_abs_pos(
+                                                        (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
+                                                        box, line_prog),
+                                                    0xFF | (int(0xFF * max(0, line_prog) / (
+                                                        1 if on_measure else 2 if on_beat else 6))) << 24,
+                                                    thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
+                                                )
+                                                self.rects_drawn += 1
+                                for i, timing in enumerate(self.timings[np.logical_and(self.time <= self.timings, self.timings < (self.time + self.approach_rate))]):
+                                    progress = timing / timeline_width
+                                    if progress < 1:
+                                        progress = progress if not math.isnan(progress) else 1
+                                        line_prog = 1 - ((timing - self.time) / self.approach_rate)
+                                        # Draw beat marker in note space
+                                        draw_list.add_line(
+                                            *self.note_pos_to_abs_pos(
+                                                (self.vis_map_size / 2 + 1, self.vis_map_size / -2 + 1),
+                                                box, line_prog),
+                                            *self.note_pos_to_abs_pos(
+                                                (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
+                                                box, line_prog),
+                                            0xFF00 | int(0xFF * max(0, line_prog)) << 24,
+                                            thickness=2 * max(0, line_prog)
+                                        )
                                         self.rects_drawn += 1
-
-                                if self.bpm_markers:
-                                    # Draw beat markers on timeline
-                                    end_beat = (timeline_width / ms_per_beat)
-                                    for beat in range(int(end_beat * self.beat_divisor + 1), 0, -1):
-                                        beat /= self.beat_divisor
-                                        on_measure = not (beat % self.time_signature[0])
-                                        on_beat = not (beat % 1)
-                                        self.swing = 1 - self.swing  # Invert this because it draws in the wrong place otherwise
-                                        swung_beat = self.adjust_swing(beat)
-                                        self.swing = 1 - self.swing
-                                        beat_time = (swung_beat * ms_per_beat) + self.offset
-                                        if (end_beat < 250 or on_beat) and (
-                                                end_beat < 500 or on_measure) and end_beat < 2000:
-                                            progress = beat_time / timeline_width
-                                            progress = progress if not math.isnan(progress) else 1
-                                            timeline_rects.append(DelayedRect((x + int(w * progress), (y + h) - (
-                                                self.timeline_height * (
-                                                    0.3 if on_measure else 0.2 if on_beat else 0.1)),
-                                                x + int(w * progress) + 1, (y + h)),
-                                                0xff0000ff if on_measure else 0x800000ff))
-                                            self.rects_drawn += 1
-                                        if (self.time <= beat_time < self.time + self.approach_rate):
-                                            line_prog = 1 - ((beat_time - self.time) / self.approach_rate)
-                                            # Draw beat marker in note space
-                                            draw_list.add_rect(
-                                                *self.note_pos_to_abs_pos(
-                                                    (self.vis_map_size / 2 + 1, self.vis_map_size / 2 + 1),
-                                                    box, line_prog),
-                                                *self.note_pos_to_abs_pos(
-                                                    (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
-                                                    box, line_prog),
-                                                0xFF | (int(0xFF * max(0, line_prog) / (
-                                                    1 if on_measure else 2 if on_beat else 6))) << 24,
-                                                thickness=2 * max(0, line_prog) * (2 if on_measure else 1)
-                                            )
-                                            self.rects_drawn += 1
-                            for i, timing in enumerate(self.timings[np.logical_and(self.time <= self.timings, self.timings < (self.time + self.approach_rate))]):
-                                progress = timing / timeline_width
-                                if progress < 1:
-                                    progress = progress if not math.isnan(progress) else 1
-                                    line_prog = 1 - ((timing - self.time) / self.approach_rate)
-                                    # Draw beat marker in note space
-                                    draw_list.add_line(
-                                        *self.note_pos_to_abs_pos(
-                                            (self.vis_map_size / 2 + 1, self.vis_map_size / -2 + 1),
-                                            box, line_prog),
-                                        *self.note_pos_to_abs_pos(
-                                            (self.vis_map_size / -2 + 1, self.vis_map_size / -2 + 1),
-                                            box, line_prog),
-                                        0xFF00 | int(0xFF * max(0, line_prog)) << 24,
-                                        thickness=2 * max(0, line_prog)
-                                    )
-                                    self.rects_drawn += 1
                             if self.times_to_display is not None:
                                 # FIXME: Copy the times display for hitsound offsets :(
                                 hitsound_times = self.times_to_display[np.logical_and(
@@ -1548,7 +1566,7 @@ class Editor:
                                                        color=0xFFFF00, alpha=int(0x80 * progress), size=0.5)
 
                             if level_was_active and mouse_pos[
-                                    1] < y + h - 5 - self.timeline_height:
+                                    1] < y + h - 5 - (0 if self.preview_mode else self.timeline_height):
                                 sdl2.SDL_ShowCursor(
                                     not (self.playtesting and imgui.is_window_focused() and imgui.is_window_hovered()))
                                 # Note placing and deleting
@@ -1661,14 +1679,17 @@ class Editor:
                                                        get_time_color() & 0x40FFFFFF if easter_egg_active else 0x40FFFFFF,
                                                        thickness=(square_side / self.vis_map_size) / 20)
                             # Draw current statistics
-                            fps_text = f"{int(self.io.framerate)}{f'/{self.fps_cap}' if not self.vsync else ''} FPS"
-                            fps_size = imgui.calc_text_size(fps_text)
-                            draw_list.add_text(w - fps_size.x - 4, y + 2, 0x80FFFFFF, fps_text)
-                            rdtf_size = imgui.calc_text_size(f"{self.rects_drawn} rects drawn")
-                            draw_list.add_text(w - rdtf_size.x - 4, y + fps_size.y + 2, 0x80FFFFFF,
-                                               f"{self.rects_drawn} rects drawn")
-                            for rect in timeline_rects:
-                                rect.draw(draw_list)
+                            if not self.preview_mode:
+                                fps_text = f"{int(self.io.framerate)}{f'/{self.fps_cap}' if not self.vsync else ''} FPS"
+                                fps_size = imgui.calc_text_size(fps_text)
+                                draw_list.add_text(w - fps_size.x - 4, y + 2, 0x80FFFFFF, fps_text)
+                                if not self.preview_mode:
+                                    for rect in timeline_rects:
+                                        rect.draw(draw_list)
+                                        self.rects_drawn += 1
+                                rdtf_size = imgui.calc_text_size(f"{self.rects_drawn} rects drawn")
+                                draw_list.add_text(w - rdtf_size.x - 4, y + fps_size.y + 2, 0x80FFFFFF,
+                                                   f"{self.rects_drawn} rects drawn")
                             self.rects_drawn = 0
                             imgui.end_child()
                         imgui.end()
@@ -1677,7 +1698,7 @@ class Editor:
                         self.times_to_display = self.level.get_notes()
                         self.notes_changed = False
                     # Resize the timeline when needed
-                    if level_was_active and not dragging_timeline and (
+                    if not self.preview_mode and level_was_active and not dragging_timeline and (
                             abs(((y + h) - mouse_pos[1]) - self.timeline_height) <= 5 or was_resizing_timeline):
                         if cursor != "resize_ns":
                             if sdl2_cursor is not None:
