@@ -726,21 +726,23 @@ class Editor:
                                     state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
                                     start=start_time,
                                     buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
-            elif self.changed_since_save:
-                if name_id != 2 or (time.time() % 15 < 0.1):  # Has the level been saved?
-                    name_id = 2
-                    sdl2.SDL_SetWindowTitle(window, f"*{self.filename} - SSPy".encode("utf-8"))
-                    self.RPC.update(details=f"Editing {self.filename}", small_image="icon",
+            else:
+                level_path = Path(self.filename).name
+                if self.changed_since_save:
+                    if name_id != 2 or (time.time() % 15 < 0.1):  # Has the level been saved?
+                        name_id = 2
+                        sdl2.SDL_SetWindowTitle(window, f"*{level_path} - SSPy".encode("utf-8"))
+                        self.RPC.update(details=f"Editing {level_path}", small_image="icon",
+                                        state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
+                                        start=start_time,
+                                        buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
+                elif name_id != 3 or (time.time() % 15 < 0.1):
+                    name_id = 3
+                    sdl2.SDL_SetWindowTitle(window, f"{level_path} - SSPy".encode("utf-8"))
+                    self.RPC.update(details=f"Editing {level_path}", small_image="icon",
                                     state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
                                     start=start_time,
                                     buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
-            elif name_id != 3 or (time.time() % 15 < 0.1):
-                name_id = 3
-                sdl2.SDL_SetWindowTitle(window, f"{self.filename} - SSPy".encode("utf-8"))
-                self.RPC.update(details=f"Editing {self.filename}", small_image="icon",
-                                state=f"{self.level.get_end() / 1000:.1f} seconds long, {len(self.level.get_notes())} notes",
-                                start=start_time,
-                                buttons=[{"label": "GitHub", "url": "https://github.com/balt-dev/SSpy/"}])
             with imgui.font(font):
                 while sdl2.SDL_PollEvent(ctypes.byref(event)) != 0:
                     # Handle quitting the app
