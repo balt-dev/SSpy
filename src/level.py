@@ -18,7 +18,7 @@ def read_line(file):
     out = bytearray(b"")
     while (f := file.read(1)) != b"\n":
         out.append(int.from_bytes(f, "little"))
-    return out.decode("utf-8")
+    return out.decode("utf-8", errors='ignore')
 
 
 class Level(ABC):
@@ -66,7 +66,7 @@ def write_sspm2_variable(output, var, custom_type, arr_type=None):
     elif custom_type == 3:
         output.write(var.to_bytes(4, "little"))
     elif custom_type == 4:
-        output.write(var.to_bytes(8, "little"))
+        output.write(var.to_bytes(8, "little", signed=True))
     elif custom_type == 5:
         output.write(struct.pack("f", var))
     elif custom_type == 6:
@@ -113,7 +113,7 @@ def read_sspmv2_variable(f, custom_type=None):
     elif custom_type == 3:
         return [int.from_bytes(f.read(4), "little"), custom_type]
     elif custom_type == 4:
-        return [int.from_bytes(f.read(8), "little"), custom_type]
+        return [int.from_bytes(f.read(8), "little", signed=True), custom_type]
     elif custom_type == 5:
         return [struct.unpack("f", f.read(4))[0], custom_type]
     elif custom_type == 6:
@@ -128,11 +128,11 @@ def read_sspmv2_variable(f, custom_type=None):
     elif custom_type == 8:
         return [f.read(int.from_bytes(f.read(2), "little")), custom_type]
     elif custom_type == 9:
-        return [f.read(int.from_bytes(f.read(2), "little")).decode("utf-8"), custom_type]
+        return [f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore'), custom_type]
     elif custom_type == 10:
         return [f.read(int.from_bytes(f.read(4), "little")), custom_type]
     elif custom_type == 11:
-        return [f.read(int.from_bytes(f.read(4), "little")).decode("utf-8"), custom_type]
+        return [f.read(int.from_bytes(f.read(4), "little")).decode("utf-8", errors='ignore'), custom_type]
     elif custom_type == 12:
         # Array
         values = []
@@ -172,8 +172,8 @@ def repr_sspmv2_variable(var, custom_type):
 
 
 def wstr(output, string, length=2):
-    output.write(len(string.encode("utf-8")).to_bytes(length, "little"))
-    output.write(string.encode("utf-8"))
+    output.write(len(string.encode("utf-8", errors='ignore')).to_bytes(length, "little"))
+    output.write(string.encode("utf-8", errors='ignore'))
 
 
 class SSPMLevel(Level):
@@ -262,15 +262,15 @@ class SSPMLevel(Level):
                 f.read(8)  # cover offset, again don't need
                 cover_bitlen = int.from_bytes(f.read(8), "little")
                 f.read(32)
-                song_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
-                name = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
-                song_name = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
+                song_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore')
+                name = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore')
+                song_name = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore')
                 authors = []
                 for _ in range(int.from_bytes(f.read(2), "little")):
-                    authors.append(f.read(int.from_bytes(f.read(2), "little")).decode("utf-8"))
+                    authors.append(f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore'))
                 fields = {}
                 for _ in range(int.from_bytes(f.read(2), "little")):
-                    custom_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
+                    custom_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore')
                     value, f_type = read_sspmv2_variable(f)
                     fields[custom_id] = (value, f_type)
                 metadata = False
@@ -292,7 +292,7 @@ class SSPMLevel(Level):
                 marker_types = {}
                 for i in range(ord(f.read(1))):
                     # Each marker is a pseudo-struct
-                    marker_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8")
+                    marker_id = f.read(int.from_bytes(f.read(2), "little")).decode("utf-8", errors='ignore')
                     marker_types[marker_id] = []
                     assert i != 0 or marker_id == "ssp_note", "Error while loading SSPMv2: First defined marker wasn't a note!"
                     for _ in range(ord(f.read(1))):
@@ -336,7 +336,7 @@ class SSPMLevel(Level):
             output.write(b"\x00" * 20)  # Reserve something for the hash, come back later
             output.write(int(self.get_end()).to_bytes(4, "little"))
             output.write(len(self.notes).to_bytes(4, "little"))
-            output.write((len(self.notes) + len(self.markers)).to_bytes(4, "little"))
+            output.write((len(self.notes) + sum([len(m) for m in self.markers.values()])).to_bytes(4, "little"))
             output.write((self.difficulty + 1).to_bytes(1, "little"))
             output.write(self.rating.to_bytes(2, "little"))
             output.write((self.audio is not None).to_bytes(1, "little"))  # bool is a subclass of int

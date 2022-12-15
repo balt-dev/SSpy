@@ -10,7 +10,6 @@ import time
 import traceback
 import webbrowser
 from more_itertools import locate
-from zipfile import ZipFile
 from tkinter import filedialog
 from ctypes import POINTER, c_int
 
@@ -47,7 +46,7 @@ METRONOME_B = AudioSegment.from_file(f"{SCRIPT_DIR + os.sep}assets{os.sep}metron
 VAR_TYPES = ["8-bit Unsigned Integer",
              "16-bit Unsigned Integer",
              "32-bit Unsigned Integer",
-             "64-bit Unsigned Integer",
+             "64-bit Signed Integer",
              "Float",
              "Double",
              "Position",
@@ -212,7 +211,7 @@ class Editor:
         if speed < 0:
             sound = sound.reverse()
         try:
-            assert sound.duration_seconds / speed < 3600, "The audio that was going to be played is too large.\nIf you want to circumvent this check, go to line 133 in src/loop.py and remove lines 211 through 220."
+            assert sound.duration_seconds / speed < 3600, f"The audio that was going to be played is too large.\nIf you want to circumvent this check, remove line {sys._getframe().f_lineno} from src/loop.py."
             assert abs(
                 speed) * sound.frame_rate < 2147483647, "The audio that was going to be played is too fast, and the speed in samples can't be converted to a C integer."
         except AssertionError as e:
@@ -504,20 +503,21 @@ class Editor:
     def keys(self):
         return tuple(self.io.keys_down)
 
-    def time_scroll(self, y, keys, ms_per_beat):
+    def time_scroll(self, y, keys):
         if self.level is not None:
             # Check modifier keys
             use_bpm = not (keys[sdl2.SDL_SCANCODE_LALT] or keys[sdl2.SDL_SCANCODE_RALT]) and (
                 self.bpm != 0)  # If either alt key is pressed, or there's no bpm markers to base it off of
             if use_bpm:
-                current_beat = (self.time) / (ms_per_beat)
+                ms_per_beat = 60000 / self.bpm
+                current_beat = (self.time - self.offset) / (ms_per_beat)
                 if keys[sdl2.SDL_SCANCODE_LSHIFT] or keys[sdl2.SDL_SCANCODE_RSHIFT]:
                     increment = self.time_signature[0]
                 elif keys[sdl2.SDL_SCANCODE_LCTRL] or keys[sdl2.SDL_SCANCODE_RCTRL]:
                     increment = 1
                 else:
                     increment = 1 / self.beat_divisor
-                self.time = max((current_beat + increment * y) * ms_per_beat, 0)
+                self.time = round((current_beat + increment * y) * ms_per_beat / (ms_per_beat / self.beat_divisor)) * (ms_per_beat / self.beat_divisor) + self.offset
             else:
                 if keys[sdl2.SDL_SCANCODE_LSHIFT] or keys[sdl2.SDL_SCANCODE_RSHIFT]:
                     increment = 100
@@ -753,7 +753,7 @@ class Editor:
                         else:
                             imgui.open_popup("quit.ensure")
                     if event.type == sdl2.SDL_MOUSEWHEEL and level_was_active and not self.playing:
-                        self.time_scroll(event.wheel.y, keys, ms_per_beat)
+                        self.time_scroll(event.wheel.y, keys)
                     impl.process_event(event)
                 self.menu_choice = None
                 # Handle file keybinds
@@ -1309,7 +1309,7 @@ class Editor:
                             level_was_active = imgui.is_window_focused()
                             if level_was_active and (keys[sdl2.SDL_SCANCODE_LEFT] or keys[sdl2.SDL_SCANCODE_RIGHT]) and not \
                                     (old_keys[sdl2.SDL_SCANCODE_LEFT] or old_keys[sdl2.SDL_SCANCODE_RIGHT]):
-                                self.time_scroll((2 * keys[sdl2.SDL_SCANCODE_RIGHT]) - 1, keys, ms_per_beat)
+                                self.time_scroll((2 * keys[sdl2.SDL_SCANCODE_RIGHT]) - 1, keys)
                             draw_list = imgui.get_window_draw_list()
                             if not dragging_timeline:
                                 timeline_width = max(self.level.get_end() + 1000, self.time + self.approach_rate, 1)
@@ -1757,7 +1757,7 @@ class Editor:
             if self.playing:
                 self.time = ((time.perf_counter_ns() - self.starting_time) / (
                     1000000 / self.audio_speed)) + self.starting_position
-            self.time = min(max(self.time, 0),
+            self.time = min(max(int(self.time), 0),
                             2 ** 31 - 1)  # NOTE: This needs to be 2**31-1 no matter if it's on a 32-bit or 64-bit computer, so no sys.maxsize here
             was_playing = self.playing
             self.unique_label_counter = 0
