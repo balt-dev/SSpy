@@ -207,7 +207,6 @@ class Editor:
         self.sensitivity = 2.0
         self.unique_label_counter = 0
         self.RPC = Presence(1032430090505703486)
-        self.displayed_markers = []
 
     def speed_change(self, sound, speed=1.0):
         if speed < 0:
@@ -630,6 +629,7 @@ class Editor:
         marker_add_index = 0
         timings_quantize = True
         easter_egg_activated = False
+        sv_multiplier = 1
 
         # Load constant textures
         with Image.open(f"{SCRIPT_DIR + os.sep}assets{os.sep}nocover.png") as im:
@@ -1156,43 +1156,45 @@ class Editor:
                                 marker_add_index = value
                             imgui.same_line()
                             if imgui.button("Add Here"):
-                                self.level.markers.append(dict(time=self.time, m_type=marker_add_index + 1,
-                                                               fields=[VAR_DEFAULTS[var_type - 1] for var_type in
-                                                                       tuple(self.level.marker_types.values())[
-                                                                           marker_add_index + 1]]))
+                                marker_type = tuple(self.level.marker_types.keys())[marker_add_index + 1]
+                                self.level.markers[marker_type] = self.level.markers.get(marker_type, [])
+                                self.level.markers[marker_type].append(dict(time=self.time,
+                                                                            fields=[VAR_DEFAULTS[var_type - 1] for var_type in
+                                                                                    tuple(self.level.marker_types.values())[
+                                                                                marker_add_index + 1]]))
                             imgui.separator()
-                            for e, (i, marker) in enumerate(self.displayed_markers):
-                                changed, value = imgui.combo(f"##edit-marker-{i}", marker["m_type"] - 1,
+                            for e, (marker_type, i, marker) in enumerate(self.displayed_markers):
+                                changed, value = imgui.combo(f"##edit-marker-{i}", tuple(self.level.marker_types.keys()).index(marker_type) - 1,
                                                              [*self.level.marker_types][1:])
                                 if changed:
-                                    self.level.markers[i] = dict(time=self.time, m_type=value + 1,
-                                                                 fields=[VAR_DEFAULTS[var_type] for var_type in
-                                                                         tuple(self.level.marker_types.values())[
-                                                                             value + 1]])
+                                    self.level.markers[tuple(self.level.marker_types.keys())[value + 1]][i] = dict(time=self.time,
+                                                                                                                   fields=[VAR_DEFAULTS[var_type] for var_type in
+                                                                                                                           tuple(self.level.marker_types.values())[
+                                                                                                                       value + 1]])
                                 imgui.same_line()
                                 if imgui.button(f"-##remove-marker-{i}", 26, 26):
-                                    del self.level.markers[i]
+                                    del self.level.markers[marker_type][i]
                                 imgui.indent()
                                 try:
-                                    var_types = tuple(self.level.marker_types.values())[marker["m_type"]]
+                                    var_types = self.level.marker_types[marker_type]
                                     assert len(marker["fields"]) == len(var_types)
                                     any_changed = False
                                     for j, field in enumerate(marker["fields"]):
-                                        changed, value, *_ = self.display_variable([i, j], field, var_types[j], _from_array=True)
+                                        changed, value, *_ = self.display_variable([i, j], field[0], var_types[j], _from_array=True)
                                         if changed:
                                             any_changed = True
-                                            marker["fields"][j] = value
+                                            marker["fields"][j][0] = value
                                     if any_changed:
-                                        self.level.markers[i] = marker
+                                        self.level.markers[marker_type][i] = marker
                                         self.displayed_markers[e] = marker
-                                except (TypeError, AssertionError):
+                                except (TypeError, AssertionError) as e:
+                                    traceback.print_exc()
                                     imgui.text_colored("! This marker type has changed, making this marker invalid.", 1, 0.25, 0.25)
                                     if imgui.button(f"Reset##reset-marker-{i}"):
-                                        marker = dict(time=self.time, m_type=marker["m_type"],
+                                        marker = dict(time=self.time,
                                                       fields=[VAR_DEFAULTS[var_type - 1] for var_type in
-                                                              tuple(self.level.marker_types.values())[
-                                                          marker["m_type"]]])
-                                        self.level.markers[i] = marker
+                                                              self.level.marker_types[marker_type]])
+                                        self.level.markers[marker_type][i] = marker
                                         self.displayed_markers[e] = marker
                                 imgui.unindent()
                             if imgui.button("Close"):
@@ -1424,35 +1426,34 @@ class Editor:
                                         old_time = -1
                                         offset = 0
                                         self.displayed_markers = []
-                                        for i, marker in enumerate(self.level.markers):  # XXX: this isn't very good
-                                            if marker["time"] == old_time:
-                                                offset += 1
-                                            else:
-                                                offset = 0
-                                                old_time = marker["time"]
-                                            if self.time <= marker["time"] < (self.time + self.approach_rate):
+                                        for marker_type in self.level.markers:
+                                            for i, marker in enumerate(self.level.markers[marker_type]):
                                                 line_prog = 1 - ((marker["time"] - self.time) / self.approach_rate)
-                                                draw_list.add_line(
-                                                    *self.note_pos_to_abs_pos(
-                                                        (self.vis_map_size / 2 + 1,
-                                                         (self.vis_map_size / 2 + 1) + (0.05 * offset)),
-                                                        box, line_prog),
-                                                    *self.note_pos_to_abs_pos(
-                                                        (self.vis_map_size / -2 + 1,
-                                                         (self.vis_map_size / 2 + 1) + (0.05 * offset)),
-                                                        box, line_prog),
-                                                    0xFFFFFF | (int(0xFF * max(0, line_prog)) << 24),
-                                                    thickness=4 * line_prog
-                                                )
-                                            progress = marker["time"] / timeline_width
-                                            timeline_rects.append(
-                                                DelayedRect((x + int(w * progress), (y + h) - self.timeline_height * 0.2,
-                                                             x + int(w * progress) + 1,
-                                                             (y + h) - self.timeline_height * 0.4),
-                                                            0x00ff00ff))
-                                            if self.time == marker["time"]:
-                                                self.displayed_markers.append((i, marker))
-                                            self.rects_drawn += 1
+                                                if marker["time"] == old_time:
+                                                    offset += imgui.get_font_size() / 4
+                                                else:
+                                                    offset = 0
+                                                    old_time = marker["time"]
+                                                if self.time <= marker["time"] < (self.time + self.approach_rate):
+                                                    imgui.set_window_font_scale(self.perspective_scale(line_prog) * 4)
+                                                    draw_list.add_text(
+                                                        *self.note_pos_to_abs_pos(
+                                                            (self.vis_map_size / -2 + 1,
+                                                             (self.vis_map_size / 2 + 1) + (0.05 * offset)),
+                                                            box, line_prog),
+                                                        0xFFFFFF | (int(0xFF * max(0, line_prog)) << 24),
+                                                        f"{marker_type}"
+                                                    )
+                                                    imgui.set_window_font_scale(1)
+                                                progress = marker["time"] / timeline_width
+                                                timeline_rects.append(
+                                                    DelayedRect((x + int(w * progress), (y + h) - self.timeline_height * 0.2,
+                                                                 x + int(w * progress) + 1,
+                                                                 (y + h) - self.timeline_height * 0.4),
+                                                                0x00ff00ff))
+                                                if self.time == marker["time"]:
+                                                    self.displayed_markers.append((marker_type, i, marker))
+                                                self.rects_drawn += 1
 
                                     if self.bpm_markers:
                                         # Draw beat markers on timeline

@@ -105,34 +105,34 @@ def read_sspmv2_variable(f, custom_type=None):
     if custom_type is None:
         custom_type = ord(f.read(1))
     if custom_type == 0:
-        return (None, custom_type)
+        return [None, custom_type]
     elif custom_type == 1:
-        return ord(f.read(1)), custom_type
+        return [ord(f.read(1)), custom_type]
     elif custom_type == 2:
-        return int.from_bytes(f.read(2), "little"), custom_type
+        return [int.from_bytes(f.read(2), "little"), custom_type]
     elif custom_type == 3:
-        return int.from_bytes(f.read(4), "little"), custom_type
+        return [int.from_bytes(f.read(4), "little"), custom_type]
     elif custom_type == 4:
-        return int.from_bytes(f.read(8), "little"), custom_type
+        return [int.from_bytes(f.read(8), "little"), custom_type]
     elif custom_type == 5:
-        return struct.unpack("f", f.read(4))[0], custom_type
+        return [struct.unpack("f", f.read(4))[0], custom_type]
     elif custom_type == 6:
-        return struct.unpack("d", f.read(8))[0], custom_type
+        return [struct.unpack("d", f.read(8))[0], custom_type]
     elif custom_type == 7:
         # Position
         is_quantum = ord(f.read(1))
         if is_quantum:
-            return (struct.unpack("ff", f.read(8))), custom_type
+            return [list(struct.unpack("ff", f.read(8))), custom_type]
         else:
-            return (struct.unpack("BB", f.read(2))), custom_type
+            return [list(struct.unpack("BB", f.read(2))), custom_type]
     elif custom_type == 8:
-        return f.read(int.from_bytes(f.read(2), "little")), custom_type
+        return [f.read(int.from_bytes(f.read(2), "little")), custom_type]
     elif custom_type == 9:
-        return f.read(int.from_bytes(f.read(2), "little")).decode("utf-8"), custom_type
+        return [f.read(int.from_bytes(f.read(2), "little")).decode("utf-8"), custom_type]
     elif custom_type == 10:
-        return f.read(int.from_bytes(f.read(4), "little")), custom_type
+        return [f.read(int.from_bytes(f.read(4), "little")), custom_type]
     elif custom_type == 11:
-        return f.read(int.from_bytes(f.read(4), "little")).decode("utf-8"), custom_type
+        return [f.read(int.from_bytes(f.read(4), "little")).decode("utf-8"), custom_type]
     elif custom_type == 12:
         # Array
         values = []
@@ -141,9 +141,34 @@ def read_sspmv2_variable(f, custom_type=None):
         arr_length = int.from_bytes(f.read(2), "little")
         for _ in arr_length:
             values.append(read_sspmv2_variable(f, c_type)[0])
-        return values, custom_type, c_type
+        return [values, custom_type, c_type]
     else:
         raise Exception(f"Error while loading SSPMv2: Field type {hex(custom_type)} isn't defined!")
+
+
+def repr_sspmv2_variable(var, custom_type):
+    if custom_type == 0:
+        return "null (?!)"
+    elif custom_type == 1:
+        return f"{var}b"
+    elif custom_type == 2:
+        return f"{var}s"
+    elif custom_type == 3:
+        return f"{var}"
+    elif custom_type == 4:
+        return f"{var}L"
+    elif custom_type == 5:
+        return f"{var}f"
+    elif custom_type == 6:
+        return f"{var}d"
+    elif custom_type == 7:
+        return f"{[repr_sspmv2_variable(n, 1 if type(n) == int else 6) for n in var]}"
+    elif custom_type in [8, 10]:
+        return f"\"{var[:16]}\""
+    elif custom_type == [9, 11]:
+        return f"{hex(var[:16])[2:].upper()}"
+    else:
+        return "???"
 
 
 def wstr(output, string, length=2):
@@ -160,7 +185,7 @@ class SSPMLevel(Level):
                      "offset": (0, 3),
                      "swing": (0.5, 6)
                  },
-                 song_name="Unnamed", marker_types={"ssp_note": [0x7]}, markers=[], modchart=False, rating=0, **kwargs):
+                 song_name="Unnamed", marker_types={"ssp_note": [0x7]}, markers={}, modchart=False, rating=0, **kwargs):
         self.song_name = song_name
         self.custom_fields = custom_fields
         self.marker_types = marker_types
@@ -173,7 +198,7 @@ class SSPMLevel(Level):
     def load(cls, file):
         with open(file, "rb") as f:
             assert f.read(
-                4) == b"SS+m", "Invalid f signature! Your level might be corrupted, or in the wrong format."
+                4) == b"SS+m", "Invalid file signature! Your level might be corrupted, or in the wrong format."
             version = int.from_bytes(f.read(2), "little")
             if version == 1:
                 print("Converting map from SSPMv1...")
@@ -274,7 +299,7 @@ class SSPMLevel(Level):
                         marker_types[marker_id].append(ord(f.read(1)))
                     f.read(1)
                 notes = {}
-                markers = []
+                markers = {}
                 for i in range(marker_amt):
                     time = int.from_bytes(f.read(4), "little")
                     m_type = ord(f.read(1))
@@ -284,9 +309,15 @@ class SSPMLevel(Level):
                         else:
                             notes[time] = [read_sspmv2_variable(f, 7)[0]]
                     else:
-                        marker = {"time": time, "m_type": m_type, "fields": []}
-                        for v_type in marker_types[tuple(marker_types.keys())[m_type]]["fields"]:
+                        marker = {"time": time, "fields": []}
+                        marker_id = tuple(marker_types.keys())[m_type]
+                        for v_type in marker_types[marker_id]:
                             marker["fields"].append(read_sspmv2_variable(f, v_type))
+                        if m_type in markers:
+                            markers[marker_id].append(marker)
+                        else:
+                            markers[marker_id] = [marker]
+
                 return cls(name, authors, notes, cover, audio, difficulty, song_id, song_name=song_name,
                            custom_fields=fields, marker_types=marker_types, markers=markers,
                            modchart=modchart, rating=rating), \
