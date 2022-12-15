@@ -312,7 +312,7 @@ class SSPMLevel(Level):
                         marker = {"time": time, "fields": []}
                         marker_id = tuple(marker_types.keys())[m_type]
                         for v_type in marker_types[marker_id]:
-                            marker["fields"].append(read_sspmv2_variable(f, v_type))
+                            marker["fields"].append(read_sspmv2_variable(f, v_type)[0])
                         if m_type in markers:
                             markers[marker_id].append(marker)
                         else:
@@ -412,14 +412,19 @@ class SSPMLevel(Level):
             output.seek(mkdef_end)
             markr_ptr = output.tell()
             markers = self.markers.copy()
+            markers["ssp_note"] = []
             for note in self.notes:
                 for pos in self.notes[note]:
-                    markers.append({"time": note, "m_type": 0, "fields": [pos]})
-            for marker in sorted(markers, key=lambda x: x["time"]):
+                    markers["ssp_note"].append({"time": note, "fields": [pos]})
+            markers_sortable = []
+            for marker_type, marker_list in markers.items():
+                for marker in marker_list:
+                    markers_sortable.append(marker | {"type": tuple(self.marker_types.keys()).index(marker_type)})
+            for marker in sorted(markers_sortable, key=lambda x: x["time"]):
                 output.write(int(marker["time"]).to_bytes(4, "little"))
-                output.write(marker["m_type"].to_bytes(1, "little"))
+                output.write(marker["type"].to_bytes(1, "little"))
                 for i, var in enumerate(marker["fields"]):
-                    var_type = tuple(self.marker_types.values())[marker["m_type"]][i]
+                    var_type = tuple(self.marker_types.values())[marker["type"]][i]
                     write_sspm2_variable(output, var, var_type)
             markr_end = output.tell()
             output.seek(markr_loc)

@@ -542,7 +542,7 @@ class Editor:
     def snap_time(self):
         ms_per_beat = (60000 / self.bpm) * (4 / self.time_signature[1])
         step = (ms_per_beat) / self.beat_divisor
-        self.time = math.floor((round(self.time / step) * (step)) - ((ms_per_beat - self.offset) % ms_per_beat))
+        self.time = int((round(self.time / step) * (step)) - ((ms_per_beat - self.offset) % ms_per_beat))
 
     def load_file(self, filename):
         if Path(filename).suffix == ".sspm":
@@ -1180,10 +1180,10 @@ class Editor:
                                     assert len(marker["fields"]) == len(var_types)
                                     any_changed = False
                                     for j, field in enumerate(marker["fields"]):
-                                        changed, value, *_ = self.display_variable([i, j], field[0], var_types[j], _from_array=True)
+                                        changed, value, *_ = self.display_variable([i, j], field, var_types[j], _from_array=True)
                                         if changed:
                                             any_changed = True
-                                            marker["fields"][j][0] = value
+                                            marker["fields"][j] = value
                                     if any_changed:
                                         self.level.markers[marker_type][i] = marker
                                         self.displayed_markers[e] = marker
