@@ -3,21 +3,6 @@
 
 
 ---
-## Roadmap
-- [x] Basic functionality
-  - [x] Loading/Saving
-  - [x] Timeline
-  - [x] Note display
-- [x] Note placing and removing
-- [x] Audio playing
-  - [x] BPM markers
-- [x] Waveform on timeline
-- [x] .txt map save/load support
-- [x] Vulnus support
-- [x] In-editor playtesting
-- [ ] Investigate performance issues on Windows
-- [ ] Optimizations for low-end devices
-
 
 ## FAQ:
 
@@ -81,7 +66,7 @@ This usually happens when the level is interrupted during saving. It's good prac
 
 ## Notes
 
-This is still beta software! Don't be surprised if it crashes. Report the crash to me and I'll handle it.\
+If it crashes, report the crash to me and I'll handle it. Make semi-frequent backups.\
 ~~The code behind the file picker was taken from https://github.com/Zygahedron/Parabox-Editor, with [explicit permission from the repository owner.][1]~~
 The in-app file picker has been removed in favor of a native dialog. 
 
